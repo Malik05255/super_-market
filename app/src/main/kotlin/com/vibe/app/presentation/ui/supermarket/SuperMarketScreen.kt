@@ -18,6 +18,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -27,13 +28,16 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,6 +51,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.google.android.gms.mlkit.barcode.GmsBarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
+import com.vibe.app.data.model.ProductSnapshot
 import com.vibe.app.data.model.RetailerOffer
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -56,6 +61,7 @@ fun SuperMarketScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val healthyClouds by viewModel.healthyClouds.collectAsStateWithLifecycle()
+    var infoProduct by remember { mutableStateOf<ProductSnapshot?>(null) }
     val context = LocalContext.current
     val scannerOptions = remember {
         com.google.android.gms.mlkit.barcode.GmsBarcodeScannerOptions.Builder()
@@ -89,12 +95,12 @@ fun SuperMarketScreen(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "امسح الباركود وشاهد أسعار المنتج في المتاجر",
+                    text = "امسح الباركود وشاهد أسعار نفس المنتج في المتاجر",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "مزامنة الأسعار مجدولة كل 12 ساعة",
+                    text = "نفس الباركود أولًا • ثم مطابقة المنتج • تحديث كل 12 ساعة",
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -108,9 +114,7 @@ fun SuperMarketScreen(
                 }
 
                 Spacer(Modifier.height(22.dp))
-
                 ProductImageCard(state)
-
                 Spacer(Modifier.height(18.dp))
 
                 Button(
@@ -130,9 +134,19 @@ fun SuperMarketScreen(
                 }
 
                 Spacer(Modifier.height(20.dp))
-                ResultPanel(state)
+                ResultPanel(
+                    state = state,
+                    onProductInfo = { infoProduct = it }
+                )
                 Spacer(Modifier.height(28.dp))
             }
+        }
+
+        infoProduct?.let { product ->
+            ProductInfoDialog(
+                product = product,
+                onDismiss = { infoProduct = null }
+            )
         }
     }
 }
@@ -181,7 +195,10 @@ private fun ProductImageCard(state: SuperMarketUiState) {
 }
 
 @Composable
-private fun ResultPanel(state: SuperMarketUiState) {
+private fun ResultPanel(
+    state: SuperMarketUiState,
+    onProductInfo: (ProductSnapshot) -> Unit
+) {
     Surface(
         modifier = Modifier
             .fillMaxWidth()
@@ -192,7 +209,7 @@ private fun ResultPanel(state: SuperMarketUiState) {
         when (state) {
             SuperMarketUiState.Idle -> HintContent()
             is SuperMarketUiState.Loading -> LoadingContent(state.barcode)
-            is SuperMarketUiState.Found -> ProductResult(state)
+            is SuperMarketUiState.Found -> ProductResult(state, onProductInfo)
             is SuperMarketUiState.NotFound -> MessageContent(
                 title = "المنتج غير موجود بعد",
                 body = "الباركود ${state.barcode} لم يرجع نتيجة موثوقة من السحابات المتصلة."
@@ -235,7 +252,10 @@ private fun LoadingContent(barcode: String) {
 }
 
 @Composable
-private fun ProductResult(state: SuperMarketUiState.Found) {
+private fun ProductResult(
+    state: SuperMarketUiState.Found,
+    onProductInfo: (ProductSnapshot) -> Unit
+) {
     val product = state.product
     Column(modifier = Modifier.padding(20.dp)) {
         Text(
@@ -244,14 +264,24 @@ private fun ProductResult(state: SuperMarketUiState.Found) {
             fontWeight = FontWeight.Bold
         )
         Text(
-            text = "باركود ${product.barcode}",
+            text = "الباركود المقروء: ${product.barcode}",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(
+            onClick = { onProductInfo(product) },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp)
+        ) {
+            Icon(Icons.Outlined.Info, contentDescription = null)
+            Spacer(Modifier.size(8.dp))
+            Text("معلومات المنتج", fontWeight = FontWeight.Bold)
+        }
 
-        Text("أحدث سعر مرصود", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(18.dp))
+        Text("سعر نفس الباركود أولًا", color = MaterialTheme.colorScheme.onSurfaceVariant)
         AnimatedContent(targetState = product.currentPrice, label = "current-price") { price ->
             Text(
                 text = price?.let { String.format("%.2f %s", it, product.currency) } ?: "غير متوفر",
@@ -271,7 +301,6 @@ private fun ProductResult(state: SuperMarketUiState.Found) {
         }
 
         Spacer(Modifier.height(18.dp))
-
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp)
@@ -293,21 +322,19 @@ private fun ProductResult(state: SuperMarketUiState.Found) {
         if (product.offers.isNotEmpty()) {
             Spacer(Modifier.height(22.dp))
             Text(
-                text = "أسعار السوبرماركت",
+                text = "أسعار نفس المنتج في السوبرماركت",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
             Text(
-                text = "مرتبة من الأرخص إلى الأعلى",
+                text = "تشمل الباركودات المطابقة لنفس الحجم والنوع والعبوة — مرتبة من الأرخص",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(Modifier.height(8.dp))
             product.offers.forEachIndexed { index, offer ->
-                RetailerPriceRow(offer)
-                if (index != product.offers.lastIndex) {
-                    HorizontalDivider()
-                }
+                RetailerPriceRow(offer, scannedBarcode = product.barcode)
+                if (index != product.offers.lastIndex) HorizontalDivider()
             }
         }
 
@@ -334,7 +361,7 @@ private fun ProductResult(state: SuperMarketUiState.Found) {
 }
 
 @Composable
-private fun RetailerPriceRow(offer: RetailerOffer) {
+private fun RetailerPriceRow(offer: RetailerOffer, scannedBarcode: String) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -344,6 +371,18 @@ private fun RetailerPriceRow(offer: RetailerOffer) {
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(offer.retailer, fontWeight = FontWeight.SemiBold)
+            val label = when {
+                offer.barcode.isNullOrBlank() -> null
+                offer.barcode == scannedBarcode -> "نفس الباركود"
+                else -> "باركود مطابق لنفس المنتج"
+            }
+            label?.let {
+                Text(
+                    text = it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
             offer.updatedAt?.let {
                 Text(
                     text = "آخر تغير للسعر $it",
