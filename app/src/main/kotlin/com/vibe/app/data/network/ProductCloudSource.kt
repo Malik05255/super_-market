@@ -11,6 +11,7 @@ import io.ktor.client.request.parameter
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 interface ProductCloudSource {
@@ -39,6 +40,11 @@ object ProductCloudHttpClient {
     }
 }
 
+@Serializable
+private data class SupabaseSnapshotRow(
+    val payload: ProductSnapshot
+)
+
 class SupabaseProductSource(
     private val baseUrl: String,
     private val anonKey: String,
@@ -50,7 +56,7 @@ class SupabaseProductSource(
     override suspend fun healthCheck(): Boolean {
         if (!isConfigured) return false
         return runCatching {
-            val response = client.get("${baseUrl.trimEnd('/')}/rest/v1/product_price_snapshot") {
+            val response = client.get("${baseUrl.trimEnd('/')}/rest/v1/product_snapshots") {
                 parameter("select", "barcode")
                 parameter("limit", "1")
                 header("apikey", anonKey)
@@ -63,7 +69,8 @@ class SupabaseProductSource(
     override suspend fun lookup(barcode: String): ProductSnapshot? {
         if (!isConfigured) return null
 
-        val response = client.get("${baseUrl.trimEnd('/')}/rest/v1/product_price_snapshot") {
+        val response = client.get("${baseUrl.trimEnd('/')}/rest/v1/product_snapshots") {
+            parameter("select", "payload")
             parameter("barcode", "eq.$barcode")
             parameter("limit", "1")
             header("apikey", anonKey)
@@ -72,8 +79,9 @@ class SupabaseProductSource(
         if (response.status == HttpStatusCode.NotFound) return null
         if (response.status.value !in 200..299) error("Supabase lookup failed: ${response.status}")
 
-        return response.body<List<ProductSnapshot>>()
+        return response.body<List<SupabaseSnapshotRow>>()
             .firstOrNull()
+            ?.payload
             ?.copy(cloudSource = id)
     }
 }
@@ -113,10 +121,10 @@ class FirebaseRealtimeProductSource(
     override suspend fun healthCheck(): Boolean {
         if (!isConfigured) return false
         return runCatching {
-            client.get("${databaseUrl.trimEnd('/')}/product_snapshots.json") {
-                parameter("shallow", "true")
-                parameter("limitToFirst", "1")
-            }.status.value in 200..299
+            // Keep health checks O(1): never request the potentially huge product_snapshots key set.
+            // The replica sync always writes this tiny state document after a successful refresh.
+            client.get("${databaseUrl.trimEnd('/')}/system_state/last_price_refresh.json")
+                .status.value in 200..299
         }.getOrDefault(false)
     }
 
