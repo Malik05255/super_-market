@@ -3,7 +3,10 @@ package com.vibe.app.data.repository
 import com.vibe.app.data.model.ProductSnapshot
 import com.vibe.app.data.network.ProductCloudSource
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.channelFlow
@@ -16,6 +19,18 @@ class SuperMarketRepository(
 ) {
     val configuredSourceCount: Int
         get() = sources.count { it.isConfigured }
+
+    suspend fun prewarm(): Int = coroutineScope {
+        sources
+            .filter { it.isConfigured }
+            .map { source ->
+                async(Dispatchers.IO) {
+                    withTimeoutOrNull(1_800) { source.healthCheck() } == true
+                }
+            }
+            .awaitAll()
+            .count { it }
+    }
 
     fun lookup(barcode: String): Flow<ProductSnapshot> = channelFlow {
         sources.filter { it.isConfigured }.forEach { source ->
