@@ -46,6 +46,10 @@ jobs:
       - name: Install refresh dependencies
         run: python -m pip install --disable-pip-version-check requests beautifulsoup4 google-auth
 
+      - name: Verify canonical product matching
+        working-directory: cloud/ingest
+        run: python -m unittest -v test_product_identity.py
+
       - name: Check canonical cloud configuration
         id: config
         shell: bash
@@ -87,6 +91,7 @@ jobs:
         if: always()
         run: |
           echo "### Supermarket refresh" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Product identity tests: required before refresh" >> "$GITHUB_STEP_SUMMARY"
           if [[ "${{ steps.config.outputs.ready }}" != "true" ]]; then
             echo "- Status: not configured yet" >> "$GITHUB_STEP_SUMMARY"
           else
