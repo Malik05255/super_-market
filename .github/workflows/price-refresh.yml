@@ -24,7 +24,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 330
     env:
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      # Project URL is public configuration, not a secret. This leaves only the
+      # service-role key as the required Supabase GitHub secret for ingestion.
+      SUPABASE_URL: https://lbgcjmsqqhrpceijdqng.supabase.co
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       FIREBASE_DATABASE_URL: ${{ secrets.FIREBASE_DATABASE_URL }}
       FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
@@ -47,19 +49,19 @@ jobs:
       - name: Install refresh dependencies
         run: python -m pip install --disable-pip-version-check requests beautifulsoup4 google-auth
 
-      - name: Verify canonical product matching
+      - name: Verify ingestion safety
         working-directory: cloud/ingest
-        run: python -m unittest -v test_product_identity.py
+        run: python -m unittest -v test_common.py test_product_identity.py test_refresh_v2.py
 
       - name: Check canonical cloud configuration
         id: config
         shell: bash
         run: |
-          if [[ -n "$SUPABASE_URL" && -n "$SUPABASE_SERVICE_ROLE_KEY" ]]; then
+          if [[ -n "$SUPABASE_SERVICE_ROLE_KEY" ]]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Supabase secrets are not configured; refresh is skipped safely."
+            echo "SUPABASE_SERVICE_ROLE_KEY is not configured; ingestion is skipped safely."
           fi
 
       - name: Check Cloudflare D1 configuration
@@ -92,7 +94,19 @@ jobs:
             --input cloud/.generated/d1-priority.json \
             --mark-sql cloud/.generated/d1-priority-mark.sql
 
-      - name: Refresh retailer prices
+      - name: Continuously discover new public products
+        if: steps.config.outputs.ready == 'true'
+        shell: bash
+        run: |
+          EXTRA=()
+          if [[ -n "${{ inputs.retailer }}" ]]; then
+            EXTRA+=(--retailer "${{ inputs.retailer }}")
+          fi
+          # Small bootstrap on every 12-hour cycle. This prevents a fresh database
+          # from waiting for the weekly broad discovery before it can obtain prices.
+          python cloud/ingest/refresh_v2.py --mode discover --max-pages 40 "${EXTRA[@]}"
+
+      - name: Refresh known retailer prices
         if: steps.config.outputs.ready == 'true'
         shell: bash
         run: |
@@ -118,7 +132,6 @@ jobs:
               --remote --yes --file=cloud/.generated/d1-priority-mark.sql
           fi
 
-          # A queued barcode is resolved only after we actually have a supermarket price/offer.
           npx --yes wrangler@4 d1 execute "$CLOUDFLARE_D1_DATABASE_NAME" \
             --remote --yes \
             --command="UPDATE missing_barcodes SET status='resolved', resolved_at=datetime('now') WHERE status='pending' AND barcode IN (SELECT barcode FROM product_snapshots WHERE json_extract(payload,'$.current_price') IS NOT NULL OR json_array_length(COALESCE(json_extract(payload,'$.offers'), json('[]'))) > 0)"
@@ -127,12 +140,13 @@ jobs:
         if: always()
         run: |
           echo "### Supermarket refresh" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Product identity tests: required before refresh" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Public sitemap/robots discovery: enabled" >> "$GITHUB_STEP_SUMMARY"
+          echo "- GTIN/product association tests: required before ingestion" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Small public discovery: every 12 hours" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Broad public discovery: weekly" >> "$GITHUB_STEP_SUMMARY"
           if [[ "${{ steps.config.outputs.ready }}" != "true" ]]; then
-            echo "- Status: Supabase not configured yet" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Status: add only SUPABASE_SERVICE_ROLE_KEY to enable canonical ingestion" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "- Canonical refresh: attempted" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Supabase canonical discovery + refresh: attempted" >> "$GITHUB_STEP_SUMMARY"
             echo "- Priority unknown scans: imported when D1 is configured" >> "$GITHUB_STEP_SUMMARY"
             echo "- Firebase: synchronized when credentials are present" >> "$GITHUB_STEP_SUMMARY"
             echo "- D1: synchronized when credentials are present" >> "$GITHUB_STEP_SUMMARY"
