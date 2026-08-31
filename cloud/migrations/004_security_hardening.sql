@@ -1,6 +1,10 @@
 -- Harden the public Data API surface for the supermarket backend.
 -- Android clients are read-only. All ingestion/RPC writes are service_role-only.
 
+-- Cover the source->product FK; refresh and cleanup frequently filter/join by barcode.
+create index if not exists retailer_product_sources_barcode_idx
+on public.retailer_product_sources (barcode);
+
 -- The app only needs hot snapshots and refresh state. Keep raw/source/history/identity
 -- tables unreachable from anon/authenticated even if project default grants change.
 revoke all on table public.retailers from anon, authenticated;
