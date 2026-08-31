@@ -34,18 +34,16 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v5
-      - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - name: Install identity test dependencies
-        run: python -m pip install --disable-pip-version-check requests beautifulsoup4
+      - run: python -m pip install --disable-pip-version-check requests beautifulsoup4
       - name: Verify exact and canonical product boundaries
         working-directory: cloud/ingest
         run: python -m unittest -v test_product_identity.py
 
-  assemble-debug:
-    name: Assemble Upgradeable APK
+  assemble-market:
+    name: Assemble Lightweight APK
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -54,10 +52,13 @@ jobs:
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      CLOUDFLARE_PRODUCTS_URL: ${{ secrets.CLOUDFLARE_PRODUCTS_URL }}
+      FIREBASE_DATABASE_URL: ${{ secrets.FIREBASE_DATABASE_URL }}
     steps:
       - uses: actions/checkout@v5
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
+      - uses: actions/setup-java@v5
         with:
           java-version: "17"
           distribution: "temurin"
@@ -70,94 +71,81 @@ jobs:
             KEYSTORE_PATH="$RUNNER_TEMP/supermarket-installer.jks"
             printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
             echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
-            echo "Stable signing: enabled. APKs signed with this key can update older builds signed by the same key."
             echo "SIGNING_MODE=stable" >> "$GITHUB_ENV"
           else
-            echo "Stable signing secrets are not configured. CI will fall back to an ephemeral debug key."
             echo "SIGNING_MODE=ephemeral-debug" >> "$GITHUB_ENV"
           fi
 
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+      - run: chmod +x gradlew
+      - name: Assemble standalone market APK
+        run: ./gradlew --no-daemon :market-app:assembleDebug
 
-      - name: Assemble debug APK
-        run: ./gradlew --no-daemon app:assembleDebug
+      - name: Enforce lightweight APK budget
+        shell: bash
+        run: |
+          APK="market-app/build/outputs/apk/debug/market-app-debug.apk"
+          test -f "$APK"
+          BYTES=$(stat -c%s "$APK")
+          MIB=$(awk "BEGIN {printf \"%.1f\", $BYTES/1048576}")
+          echo "APK size: ${MIB} MiB"
+          echo "APK_SIZE_BYTES=$BYTES" >> "$GITHUB_ENV"
+          echo "APK_SIZE_MIB=$MIB" >> "$GITHUB_ENV"
+          if (( BYTES > 41943040 )); then
+            echo "APK exceeds the 40 MiB lightweight quality budget" >&2
+            exit 1
+          fi
 
       - name: Prepare install artifact
         shell: bash
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk "dist/moqarin-alasaar-${GITHUB_RUN_NUMBER}.apk"
+          cp market-app/build/outputs/apk/debug/market-app-debug.apk "dist/moqarin-alasaar-${GITHUB_RUN_NUMBER}.apk"
           {
-            echo "### Android install artifact"
+            echo "### مقارن الأسعار — lightweight APK"
             echo "- Package: com.malik05255.supermarket"
-            echo "- Version code: $((10000 + GITHUB_RUN_NUMBER))"
+            echo "- Version code: $((20000 + GITHUB_RUN_NUMBER))"
+            echo "- APK size: ${APK_SIZE_MIB} MiB"
             echo "- Signing mode: $SIGNING_MODE"
             if [[ "$SIGNING_MODE" == "stable" ]]; then
-              echo "- In-place update: enabled for previous APKs signed with the same key"
+              echo "- In-place update: enabled for builds signed with this permanent key"
             else
-              echo "- In-place update: not guaranteed until stable signing secrets are configured"
+              echo "- In-place update: requires the permanent signing secrets"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: moqarin-alasaar-${{ github.run_number }}
           path: dist/*.apk
           if-no-files-found: error
           retention-days: 30
 
-  unit-tests:
-    name: Unit Tests
+  market-unit-tests:
+    name: Market Unit Tests
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
+      - uses: actions/setup-java@v5
         with:
           java-version: "17"
           distribution: "temurin"
           cache: gradle
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-      - name: Run app unit tests
-        run: ./gradlew --no-daemon app:testDebugUnitTest
+      - run: chmod +x gradlew
+      - run: ./gradlew --no-daemon :market-app:testDebugUnitTest
 
-  build-engine-tests:
-    name: Build Engine Tests
+  market-lint:
+    name: Market Android Lint
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
+      - uses: actions/setup-java@v5
         with:
           java-version: "17"
           distribution: "temurin"
           cache: gradle
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-      - name: Run build-engine tests
-        run: ./gradlew --no-daemon :build-engine:test
-
-  android-lint:
-    name: Android Lint
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v5
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
-        with:
-          java-version: "17"
-          distribution: "temurin"
-          cache: gradle
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-      - name: Run Android lint
-        run: ./gradlew --no-daemon app:lintDebug
+      - run: chmod +x gradlew
+      - run: ./gradlew --no-daemon :market-app:lintDebug
