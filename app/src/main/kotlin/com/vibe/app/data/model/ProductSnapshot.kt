@@ -10,7 +10,8 @@ data class RetailerOffer(
     val currency: String = "SAR",
     @SerialName("updated_at") val updatedAt: String? = null,
     @SerialName("branch_key") val branchKey: String? = null,
-    @SerialName("source_url") val sourceUrl: String? = null
+    @SerialName("source_url") val sourceUrl: String? = null,
+    val barcode: String? = null
 )
 
 @Serializable
@@ -52,6 +53,8 @@ data class ProductInfo(
 @Serializable
 data class ProductSnapshot(
     val barcode: String,
+    @SerialName("canonical_product_id") val canonicalProductId: Long? = null,
+    @SerialName("matched_barcodes") val matchedBarcodes: List<String> = emptyList(),
     @SerialName("name_ar") val nameAr: String? = null,
     @SerialName("name_en") val nameEn: String? = null,
     @SerialName("image_url") val imageUrl: String? = null,
