@@ -11,15 +11,42 @@ plugins {
 }
 
 android {
+    // Keep the source namespace stable so the inherited code does not need a risky package-wide
+    // refactor. The install identity is applicationId below and is fully independent from VibeApp.
     namespace = "com.vibe.app"
     compileSdk = 36
 
+    val explicitVersionCode = providers.gradleProperty("APP_VERSION_CODE")
+        .orElse(providers.environmentVariable("APP_VERSION_CODE"))
+        .orNull
+        ?.toIntOrNull()
+    val ciRunNumber = providers.environmentVariable("GITHUB_RUN_NUMBER")
+        .orNull
+        ?.toIntOrNull()
+    val resolvedVersionCode = explicitVersionCode ?: ciRunNumber?.let { 10_000 + it } ?: 10_000
+    val resolvedVersionName = providers.gradleProperty("APP_VERSION_NAME")
+        .orElse(providers.environmentVariable("APP_VERSION_NAME"))
+        .orElse("1.0.0")
+        .get()
+
+    val signingStorePath = providers.environmentVariable("ANDROID_KEYSTORE_PATH").orNull
+    val signingStorePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").orNull
+    val signingKeyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").orNull
+    val signingKeyPassword = providers.environmentVariable("ANDROID_KEY_PASSWORD").orNull
+    val stableSigningConfigured = listOf(
+        signingStorePath,
+        signingStorePassword,
+        signingKeyAlias,
+        signingKeyPassword
+    ).all { !it.isNullOrBlank() }
+
     defaultConfig {
-        applicationId = "com.vibe.app"
+        // Deliberately unique: this app can be installed beside the original VibeApp.
+        applicationId = "com.malik05255.supermarket"
         minSdk = 29
         targetSdk = 36
-        versionCode = 15
-        versionName = "1.9.0"
+        versionCode = resolvedVersionCode
+        versionName = resolvedVersionName
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -43,15 +70,35 @@ android {
         buildConfigField("String", "FIREBASE_DATABASE_URL", quotedConfig("FIREBASE_DATABASE_URL"))
     }
 
+    signingConfigs {
+        if (stableSigningConfigured) {
+            create("stableInstaller") {
+                storeFile = file(signingStorePath!!)
+                storePassword = signingStorePassword
+                keyAlias = signingKeyAlias
+                keyPassword = signingKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
+            }
+        }
+    }
+
     //noinspection WrongGradleMethod
     ksp {
         arg("room.schemaLocation", "$projectDir/schemas")
     }
 
     buildTypes {
+        debug {
+            // CI/local builds become directly upgradeable when the stable installer key is supplied.
+            signingConfigs.findByName("stableInstaller")?.let { signingConfig = it }
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            signingConfigs.findByName("stableInstaller")?.let { signingConfig = it }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
