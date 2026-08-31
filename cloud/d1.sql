@@ -41,6 +41,19 @@ CREATE INDEX IF NOT EXISTS price_observations_barcode_time_idx
 CREATE INDEX IF NOT EXISTS price_observations_retailer_time_idx
     ON price_observations (retailer_id, observed_at DESC);
 
+-- Hot read model. The 12-hour refresh job writes one compact JSON document per barcode.
+-- The mobile lookup therefore needs only one indexed row read.
+CREATE TABLE IF NOT EXISTS product_snapshots (
+    barcode TEXT PRIMARY KEY,
+    payload TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    fresh_until TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS product_snapshots_fresh_until_idx
+    ON product_snapshots (fresh_until);
+
+-- Raw-data view remains useful for diagnostics/rebuilding snapshots.
 CREATE VIEW IF NOT EXISTS product_price_snapshot AS
 SELECT
     p.barcode,
