@@ -27,6 +27,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  product-identity-tests:
+    name: Product Identity Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install identity test dependencies
+        run: python -m pip install --disable-pip-version-check requests beautifulsoup4
+      - name: Verify exact and canonical product boundaries
+        working-directory: cloud/ingest
+        run: python -m unittest -v test_product_identity.py
+
   assemble-debug:
     name: Assemble Debug
     runs-on: ubuntu-latest
