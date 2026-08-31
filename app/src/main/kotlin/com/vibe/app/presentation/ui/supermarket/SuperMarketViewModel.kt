@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.vibe.app.BuildConfig
 import com.vibe.app.data.model.ProductSnapshot
+import com.vibe.app.data.model.RetailerOffer
 import com.vibe.app.data.network.CloudflareProductSource
 import com.vibe.app.data.network.FirestoreProductSource
 import com.vibe.app.data.network.SupabaseProductSource
@@ -36,7 +37,19 @@ class SuperMarketViewModel : ViewModel() {
     private val _uiState = MutableStateFlow<SuperMarketUiState>(SuperMarketUiState.Idle)
     val uiState: StateFlow<SuperMarketUiState> = _uiState.asStateFlow()
 
+    private val _healthyClouds = MutableStateFlow(0)
+    val healthyClouds: StateFlow<Int> = _healthyClouds.asStateFlow()
+
+    val configuredClouds: Int
+        get() = repository.configuredSourceCount
+
     private var lookupJob: Job? = null
+
+    init {
+        viewModelScope.launch {
+            _healthyClouds.value = repository.prewarm()
+        }
+    }
 
     fun lookupBarcode(rawValue: String?) {
         val barcode = rawValue
@@ -86,17 +99,52 @@ class SuperMarketViewModel : ViewModel() {
             !it.nameAr.isNullOrBlank() || !it.nameEn.isNullOrBlank() || !it.imageUrl.isNullOrBlank()
         } ?: freshest
 
+        val mergedOffers = results
+            .flatMap { snapshot ->
+                if (snapshot.offers.isNotEmpty()) {
+                    snapshot.offers
+                } else {
+                    listOfNotNull(snapshot.toOfferOrNull())
+                }
+            }
+            .groupBy { it.retailer.trim().lowercase() }
+            .mapNotNull { (_, offers) ->
+                offers.maxByOrNull { it.updatedAt.toEpochScore() }
+            }
+            .sortedBy { it.price }
+
+        val currentOffer = mergedOffers.maxByOrNull { it.updatedAt.toEpochScore() }
+
         return freshest.copy(
             barcode = barcode,
             nameAr = metadata.nameAr ?: freshest.nameAr,
             nameEn = metadata.nameEn ?: freshest.nameEn,
             imageUrl = metadata.imageUrl ?: freshest.imageUrl,
+            currentPrice = currentOffer?.price ?: freshest.currentPrice,
+            currency = currentOffer?.currency ?: freshest.currency,
+            retailer = currentOffer?.retailer ?: freshest.retailer,
+            priceUpdatedAt = currentOffer?.updatedAt ?: freshest.priceUpdatedAt,
             min30d = results.mapNotNull { it.min30d }.minOrNull() ?: freshest.min30d,
             max30d = results.mapNotNull { it.max30d }.maxOrNull() ?: freshest.max30d,
-            sourceCount = results.maxOfOrNull { it.sourceCount } ?: freshest.sourceCount,
-            confidence = results.mapNotNull { it.confidence }.maxOrNull() ?: freshest.confidence
+            sourceCount = maxOf(
+                mergedOffers.size,
+                results.maxOfOrNull { it.sourceCount } ?: 0
+            ),
+            confidence = results.mapNotNull { it.confidence }.maxOrNull() ?: freshest.confidence,
+            offers = mergedOffers
         )
     }
+}
+
+private fun ProductSnapshot.toOfferOrNull(): RetailerOffer? {
+    val store = retailer?.takeIf { it.isNotBlank() } ?: return null
+    val price = currentPrice ?: return null
+    return RetailerOffer(
+        retailer = store,
+        price = price,
+        currency = currency,
+        updatedAt = priceUpdatedAt
+    )
 }
 
 private fun String?.toEpochScore(): Long {
