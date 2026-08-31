@@ -25,6 +25,11 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         tools:targetApi="upside_down_cake">
+
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode_ui" />
+
         <activity
             android:name="com.vibe.app.presentation.ui.main.MainActivity"
             android:exported="true"
