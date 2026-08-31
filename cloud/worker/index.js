@@ -1,5 +1,6 @@
 const BARCODE_RE = /^[0-9]{8,14}$/;
 const OFF_FIELDS = "code,product_name,product_name_ar,product_name_en,image_front_url,image_url,brands";
+const METADATA_TIMEOUT_MS = 1200;
 
 export default {
   async fetch(request, env, ctx) {
@@ -64,11 +65,14 @@ export default {
       return json({ error: "cloud_unavailable" }, 503, { "Cache-Control": "no-store" });
     }
 
-    // Metadata-only fallback for a new barcode. This never invents a supermarket price.
+    // Metadata-only fallback for a new barcode. It is intentionally time-bounded so an
+    // external metadata service can never become the critical path for supermarket prices.
     const metadata = await lookupOpenFoodFacts(barcode);
+    ctx.waitUntil(recordMissingBarcode(env, barcode, metadata));
+
     if (!metadata) {
       return json({ error: "product_not_found", barcode }, 404, {
-        "Cache-Control": "public, max-age=300"
+        "Cache-Control": "public, max-age=120"
       });
     }
 
@@ -90,19 +94,46 @@ export default {
         cloud_source: "open_food_facts_metadata"
       },
       200,
-      { "Cache-Control": "public, max-age=1800, stale-while-revalidate=21600" }
+      { "Cache-Control": "public, max-age=900, stale-while-revalidate=21600" }
     );
     ctx.waitUntil(cache.put(cacheKey, response.clone()));
     return response;
   }
 };
 
+async function recordMissingBarcode(env, barcode, metadata) {
+  try {
+    await env.DB.prepare(
+      `INSERT INTO missing_barcodes (
+         barcode, first_seen_at, last_seen_at, scan_count, name_ar, name_en, image_url, status
+       ) VALUES (?, datetime('now'), datetime('now'), 1, ?, ?, ?, 'pending')
+       ON CONFLICT(barcode) DO UPDATE SET
+         last_seen_at = excluded.last_seen_at,
+         scan_count = missing_barcodes.scan_count + 1,
+         name_ar = COALESCE(missing_barcodes.name_ar, excluded.name_ar),
+         name_en = COALESCE(missing_barcodes.name_en, excluded.name_en),
+         image_url = COALESCE(missing_barcodes.image_url, excluded.image_url),
+         status = CASE WHEN missing_barcodes.status = 'ignored' THEN 'ignored' ELSE 'pending' END`
+    )
+      .bind(
+        barcode,
+        metadata?.nameAr || null,
+        metadata?.nameEn || null,
+        metadata?.imageUrl || null
+      )
+      .run();
+  } catch {
+    // Queueing is best-effort and must never delay/fail the user's barcode lookup.
+  }
+}
+
 async function lookupOpenFoodFacts(barcode) {
   try {
     const endpoint = new URL(`https://world.openfoodfacts.org/api/v2/product/${barcode}.json`);
     endpoint.searchParams.set("fields", OFF_FIELDS);
     const response = await fetch(endpoint.toString(), {
-      headers: { "User-Agent": "SaudiSupermarketBarcode/1.0 (product metadata fallback)" }
+      headers: { "User-Agent": "SaudiSupermarketBarcode/1.0 (product metadata fallback)" },
+      signal: AbortSignal.timeout(METADATA_TIMEOUT_MS)
     });
     if (!response.ok) return null;
     const data = await response.json();
