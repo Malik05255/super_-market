@@ -2,6 +2,11 @@ name: Generate Release Version
 
 on:
   workflow_dispatch:
+    inputs:
+      version_name:
+        description: "Version name, e.g. 1.0.0"
+        required: false
+        type: string
   push:
     tags:
       - 'v*'
@@ -11,95 +16,89 @@ permissions:
 
 jobs:
   build:
-    name: Build Release APK
+    name: Build Stable Upgradeable Release
     runs-on: ubuntu-latest
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - name: Setup JDK
-        uses: actions/setup-java@v4
+      - name: Setup JDK 17
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Build Unsigned Release APK
-        run: ./gradlew assembleRelease
-
-      - name: Build Unsigned Release App Bundle
-        run: ./gradlew bundleRelease
-
-      - name: Decode keystore
-        env:
-          APP_KEYSTORE: ${{ secrets.APP_KEYSTORE }}
-        run: |
-          echo "$APP_KEYSTORE" | base64 -d > keystore.jks
-          cp keystore.jks "${{ github.workspace }}/app/build/outputs/apk/release/keystore.jks"
-          cp keystore.jks "${{ github.workspace }}/app/build/outputs/bundle/release/keystore.jks"
-
-      - name: Locate Android build tools
-        id: android-build-tools
+      - name: Require stable installer signing key
         shell: bash
         run: |
-          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
-          if [ -z "$sdk_root" ]; then
-            echo "ANDROID_SDK_ROOT/ANDROID_HOME is not set" >&2
-            exit 1
-          fi
+          set -euo pipefail
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required GitHub secret: $name" >&2
+              exit 1
+            fi
+          done
+          KEYSTORE_PATH="$RUNNER_TEMP/moqarin-alasaar-installer.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
 
-          apksigner_path="$(find "$sdk_root/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
-          if [ -z "$apksigner_path" ]; then
-            echo "apksigner not found under $sdk_root/build-tools" >&2
-            exit 1
-          fi
-
-          echo "apksigner=$apksigner_path" >> "$GITHUB_OUTPUT"
-
-      - name: Sign Release APK
-        working-directory: ${{ github.workspace }}/app/build/outputs/apk/release
-        env:
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      - name: Resolve release version
+        shell: bash
         run: |
-          "${{ steps.android-build-tools.outputs.apksigner }}" sign \
-            --ks keystore.jks \
-            --ks-key-alias "$KEY_ALIAS" \
-            --ks-pass env:KEYSTORE_PASSWORD \
-            --key-pass env:KEY_PASSWORD \
-            --out app-release.apk \
-            app-release-unsigned.apk
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION_NAME="${GITHUB_REF_NAME#v}"
+          elif [[ -n "${{ inputs.version_name }}" ]]; then
+            VERSION_NAME="${{ inputs.version_name }}"
+          else
+            VERSION_NAME="1.0.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "APP_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
+          echo "APP_VERSION_CODE=$((10000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+          echo "Resolved version: $VERSION_NAME ($((10000 + GITHUB_RUN_NUMBER)))"
 
-      - name: Sign Release App Bundle
-        working-directory: ${{ github.workspace }}/app/build/outputs/bundle/release
-        env:
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build signed APK and App Bundle
+        run: ./gradlew --no-daemon app:assembleRelease app:bundleRelease
+
+      - name: Verify signed APK identity
+        shell: bash
         run: |
-          jarsigner \
-            -verbose \
-            -sigalg SHA256withRSA \
-            -digestalg SHA-256 \
-            -keystore keystore.jks \
-            -storepass "$KEYSTORE_PASSWORD" \
-            -keypass "$KEY_PASSWORD" \
-            app-release.aab \
-            "$KEY_ALIAS"
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner" verify --verbose --print-certs "$APK"
+
+      - name: Prepare release files
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk "dist/moqarin-alasaar-${APP_VERSION_NAME}.apk"
+          cp app/build/outputs/bundle/release/app-release.aab "dist/moqarin-alasaar-${APP_VERSION_NAME}.aab"
+          sha256sum dist/* > dist/SHA256SUMS.txt
+          {
+            echo "### مقارن الأسعار"
+            echo "- Package: com.malik05255.supermarket"
+            echo "- Version: ${APP_VERSION_NAME} (${APP_VERSION_CODE})"
+            echo "- Signing: stable installer key"
+            echo "- Upgrade behavior: installs over any older build signed with the same key"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: release-${{ github.ref_name }}
-          path: |
-            app/build/outputs/apk/release/app-release.apk
-            app/build/outputs/bundle/release/app-release.aab
+          name: moqarin-alasaar-${{ github.run_number }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 90
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -107,6 +106,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create "${GITHUB_REF_NAME}" \
-            app/build/outputs/apk/release/app-release.apk \
-            app/build/outputs/bundle/release/app-release.aab \
+            dist/moqarin-alasaar-${APP_VERSION_NAME}.apk \
+            dist/moqarin-alasaar-${APP_VERSION_NAME}.aab \
+            dist/SHA256SUMS.txt \
+            --title "مقارن الأسعار ${APP_VERSION_NAME}" \
             --generate-notes
