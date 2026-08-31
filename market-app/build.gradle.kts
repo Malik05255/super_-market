@@ -2,7 +2,6 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.kotlin.ksp)
 }
 
 android {
@@ -84,10 +83,6 @@ android {
         }
     }
 
-    ksp {
-        arg("room.schemaLocation", "$projectDir/schemas")
-    }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
@@ -118,10 +113,6 @@ dependencies {
     implementation(libs.ktor.client.okhttp)
     implementation(libs.ktor.content.negotiation)
     implementation(libs.ktor.serialization)
-
-    implementation(libs.room)
-    implementation(libs.room.ktx)
-    ksp(libs.room.compiler)
 
     testImplementation(libs.junit)
 }
