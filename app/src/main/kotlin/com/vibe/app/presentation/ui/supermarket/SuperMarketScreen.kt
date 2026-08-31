@@ -42,8 +42,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.google.android.gms.mlkit.barcode.GmsBarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
@@ -52,7 +52,7 @@ import com.vibe.app.data.model.RetailerOffer
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SuperMarketScreen(
-    viewModel: SuperMarketViewModel = viewModel()
+    viewModel: SuperMarketViewModel = hiltViewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val healthyClouds by viewModel.healthyClouds.collectAsStateWithLifecycle()
@@ -91,6 +91,11 @@ fun SuperMarketScreen(
                 Text(
                     text = "امسح الباركود وشاهد أسعار المنتج في المتاجر",
                     style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "مزامنة الأسعار مجدولة كل 12 ساعة",
+                    style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 if (viewModel.configuredClouds > 0) {
@@ -223,7 +228,7 @@ private fun LoadingContent(barcode: String) {
     ) {
         CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
         Column {
-            Text("جارٍ قراءة النسخة المحدثة من السحابة...", fontWeight = FontWeight.Bold)
+            Text("جارٍ قراءة أسرع نسخة متاحة...", fontWeight = FontWeight.Bold)
             Text(barcode, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -259,7 +264,7 @@ private fun ProductResult(state: SuperMarketUiState.Found) {
         }
         product.priceUpdatedAt?.let {
             Text(
-                "آخر تحديث: $it",
+                "آخر تغير للسعر: $it",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -316,7 +321,11 @@ private fun ProductResult(state: SuperMarketUiState.Found) {
             )
             Spacer(Modifier.size(6.dp))
             Text(
-                text = "وصلت ${state.cloudResponses} من ${state.cloudTotal} سحابات",
+                text = when {
+                    state.cloudResponses > 0 -> "استجابت ${state.cloudResponses} من ${state.cloudTotal} سحابات"
+                    state.servedFromCache -> "ظهر فورًا من ذاكرة الهاتف — جارٍ التحقق من السحابات"
+                    else -> "جارٍ التحقق من السحابات"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -337,7 +346,7 @@ private fun RetailerPriceRow(offer: RetailerOffer) {
             Text(offer.retailer, fontWeight = FontWeight.SemiBold)
             offer.updatedAt?.let {
                 Text(
-                    text = "تحديث $it",
+                    text = "آخر تغير للسعر $it",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
