@@ -2,7 +2,7 @@ name: Supermarket Catalog Discovery
 
 on:
   schedule:
-    # Weekly discovery is deliberately separate from the fast 12-hour price refresh.
+    # Weekly broad discovery. Small discovery also runs every 12 hours in price-refresh.yml.
     - cron: "43 1 * * 0"
   workflow_dispatch:
     inputs:
@@ -29,10 +29,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 330
     env:
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_URL: https://lbgcjmsqqhrpceijdqng.supabase.co
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       MAX_PAGE_SOURCES_PER_RETAILER: ${{ inputs.max_pages || '500' }}
-      MAX_SEED_PRODUCT_LINKS_PER_RETAILER: "600"
+      MAX_SEED_PRODUCT_LINKS_PER_RETAILER: "1200"
 
     steps:
       - uses: actions/checkout@v5
@@ -46,15 +46,19 @@ jobs:
       - name: Install discovery dependencies
         run: python -m pip install --disable-pip-version-check requests beautifulsoup4
 
+      - name: Verify ingestion safety
+        working-directory: cloud/ingest
+        run: python -m unittest -v test_common.py test_product_identity.py test_refresh_v2.py
+
       - name: Check canonical cloud configuration
         id: config
         shell: bash
         run: |
-          if [[ -n "$SUPABASE_URL" && -n "$SUPABASE_SERVICE_ROLE_KEY" ]]; then
+          if [[ -n "$SUPABASE_SERVICE_ROLE_KEY" ]]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
           else
             echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "Supabase secrets are not configured; discovery is skipped safely."
+            echo "SUPABASE_SERVICE_ROLE_KEY is not configured; discovery is skipped safely."
           fi
 
       - name: Discover catalog products
@@ -75,5 +79,6 @@ jobs:
           echo "### Catalog discovery" >> "$GITHUB_STEP_SUMMARY"
           echo "- Reads public sitemap declarations from robots.txt automatically." >> "$GITHUB_STEP_SUMMARY"
           echo "- Uses robots-allowed public catalog seed pages when no sitemap is published." >> "$GITHUB_STEP_SUMMARY"
+          echo "- Extracts product links from HTML and serialized storefront state." >> "$GITHUB_STEP_SUMMARY"
           echo "- Only pages with an unambiguous valid GTIN are accepted." >> "$GITHUB_STEP_SUMMARY"
           echo "- Pages blocked by robots.txt or without a directly verifiable barcode are skipped." >> "$GITHUB_STEP_SUMMARY"
