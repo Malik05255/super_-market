@@ -5,6 +5,7 @@
     "name_en": "Carrefour",
     "base_url": "https://www.carrefourksa.com/",
     "sitemaps": ["https://www.carrefourksa.com/sitemap.xml"],
+    "catalog_seed_urls": ["https://www.carrefourksa.com/mafsau/en/"],
     "product_url_regex": "/p/[0-9]+",
     "crawl_delay_seconds": 1.0
   },
@@ -14,6 +15,7 @@
     "name_en": "LuLu Hypermarket",
     "base_url": "https://gcc.luluhypermarket.com/en-sa/",
     "sitemaps": ["https://gcc.luluhypermarket.com/en-sa/sitemap.xml"],
+    "catalog_seed_urls": ["https://gcc.luluhypermarket.com/en-sa/"],
     "product_url_regex": "/en-sa/.+/p/",
     "crawl_delay_seconds": 1.0
   },
@@ -23,6 +25,11 @@
     "name_en": "Danube",
     "base_url": "https://danube.sa/",
     "sitemaps": [],
+    "catalog_seed_urls": [
+      "https://danube.sa/en/",
+      "https://danube.sa/en/departments",
+      "https://danube.sa/en/search"
+    ],
     "product_url_regex": "/products/",
     "crawl_delay_seconds": 1.0
   },
@@ -32,6 +39,7 @@
     "name_en": "BinDawood",
     "base_url": "https://www.bindawood.sa/",
     "sitemaps": [],
+    "catalog_seed_urls": ["https://www.bindawood.sa/"],
     "product_url_regex": "/(products|product)/",
     "crawl_delay_seconds": 1.0
   },
@@ -41,6 +49,7 @@
     "name_en": "Tamimi Markets",
     "base_url": "https://shop.tamimimarkets.com/en/",
     "sitemaps": [],
+    "catalog_seed_urls": ["https://shop.tamimimarkets.com/en/"],
     "product_url_regex": "/en/product/",
     "crawl_delay_seconds": 1.0
   },
@@ -50,6 +59,7 @@
     "name_en": "Panda",
     "base_url": "https://plus.panda.sa/",
     "sitemaps": [],
+    "catalog_seed_urls": ["https://plus.panda.sa/"],
     "product_url_regex": "/(product|products)/",
     "crawl_delay_seconds": 1.0
   },
@@ -59,6 +69,7 @@
     "name_en": "Abdullah Al Othaim Markets",
     "base_url": "https://www.othaimmarkets.com/",
     "sitemaps": [],
+    "catalog_seed_urls": ["https://www.othaimmarkets.com/"],
     "product_url_regex": "/(product|products)/",
     "crawl_delay_seconds": 1.0
   },
@@ -68,6 +79,7 @@
     "name_en": "Farm Superstores",
     "base_url": "https://www.farm.com.sa/",
     "sitemaps": [],
+    "catalog_seed_urls": ["https://www.farm.com.sa/"],
     "product_url_regex": "/(product|products)/",
     "crawl_delay_seconds": 1.0
   },
@@ -77,6 +89,7 @@
     "name_en": "Spinneys",
     "base_url": "https://www.spinneys.com/en-sa/",
     "sitemaps": [],
+    "catalog_seed_urls": ["https://www.spinneys.com/en-sa/"],
     "product_url_regex": "/en-sa/catalogue/[^/]+_[0-9]+/",
     "crawl_delay_seconds": 1.0
   },
@@ -86,6 +99,7 @@
     "name_en": "AlRaya Supermarkets",
     "base_url": "https://www.alraya.com.sa/",
     "sitemaps": [],
+    "catalog_seed_urls": ["https://www.alraya.com.sa/"],
     "product_url_regex": "/(product|products)/",
     "crawl_delay_seconds": 1.0
   }
