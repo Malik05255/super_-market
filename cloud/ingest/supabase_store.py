@@ -7,6 +7,7 @@ from urllib.parse import quote
 import requests
 
 from common import ExtractedProduct
+from product_identity import derive_identity
 
 
 class SupabaseStore:
@@ -53,6 +54,7 @@ class SupabaseStore:
         return {str(row["slug"]): int(row["id"]) for row in response.json()}
 
     def upsert_product(self, product: ExtractedProduct) -> None:
+        identity = derive_identity(product)
         payload = {
             "p_barcode": product.barcode,
             "p_name_ar": product.name_ar,
@@ -60,6 +62,13 @@ class SupabaseStore:
             "p_brand": product.brand,
             "p_image_url": product.image_url,
             "p_gs1_verified": False,
+            "p_identity_key": identity.identity_key,
+            "p_variant": identity.variant,
+            "p_net_content_value": float(identity.net_content_value) if identity.net_content_value is not None else None,
+            "p_net_content_unit": identity.net_content_unit,
+            "p_pack_count": identity.pack_count,
+            "p_match_confidence": identity.confidence,
+            "p_match_method": identity.method,
         }
         response = self.session.post(self._url("rpc/upsert_product_metadata"), json=payload, timeout=30)
         response.raise_for_status()
