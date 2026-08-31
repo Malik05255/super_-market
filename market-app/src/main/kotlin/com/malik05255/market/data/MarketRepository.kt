@@ -34,7 +34,9 @@ class MarketRepository(
 
         sources.filter { it.configured }.forEach { source ->
             launch(Dispatchers.IO) {
-                val product = withTimeoutOrNull(2_200) { runCatching { source.lookup(barcode) }.getOrNull() }
+                val product = withTimeoutOrNull(source.lookupTimeoutMs) {
+                    runCatching { source.lookup(barcode) }.getOrNull()
+                }
                 if (product != null) {
                     send(product)
                     cache(product)
