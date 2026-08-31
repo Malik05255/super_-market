@@ -32,6 +32,7 @@ jobs:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       MAX_PAGE_SOURCES_PER_RETAILER: ${{ inputs.max_pages || '500' }}
+      MAX_SEED_PRODUCT_LINKS_PER_RETAILER: "600"
 
     steps:
       - uses: actions/checkout@v5
@@ -64,7 +65,7 @@ jobs:
           if [[ -n "${{ inputs.retailer }}" ]]; then
             EXTRA+=(--retailer "${{ inputs.retailer }}")
           fi
-          python cloud/ingest/refresh.py --mode discover \
+          python cloud/ingest/refresh_v2.py --mode discover \
             --max-pages "$MAX_PAGE_SOURCES_PER_RETAILER" \
             "${EXTRA[@]}"
 
@@ -72,5 +73,7 @@ jobs:
         if: always()
         run: |
           echo "### Catalog discovery" >> "$GITHUB_STEP_SUMMARY"
-          echo "Only pages with an unambiguous valid GTIN are accepted." >> "$GITHUB_STEP_SUMMARY"
-          echo "Pages blocked by robots.txt or without a directly verifiable barcode are skipped." >> "$GITHUB_STEP_SUMMARY"
+          echo "- Reads public sitemap declarations from robots.txt automatically." >> "$GITHUB_STEP_SUMMARY"
+          echo "- Uses robots-allowed public catalog seed pages when no sitemap is published." >> "$GITHUB_STEP_SUMMARY"
+          echo "- Only pages with an unambiguous valid GTIN are accepted." >> "$GITHUB_STEP_SUMMARY"
+          echo "- Pages blocked by robots.txt or without a directly verifiable barcode are skipped." >> "$GITHUB_STEP_SUMMARY"
