@@ -40,8 +40,7 @@ android {
         buildConfigField("String", "SUPABASE_URL", quotedConfig("SUPABASE_URL"))
         buildConfigField("String", "SUPABASE_ANON_KEY", quotedConfig("SUPABASE_ANON_KEY"))
         buildConfigField("String", "CLOUDFLARE_PRODUCTS_URL", quotedConfig("CLOUDFLARE_PRODUCTS_URL"))
-        buildConfigField("String", "FIRESTORE_PROJECT_ID", quotedConfig("FIRESTORE_PROJECT_ID"))
-        buildConfigField("String", "FIRESTORE_API_KEY", quotedConfig("FIRESTORE_API_KEY"))
+        buildConfigField("String", "FIREBASE_DATABASE_URL", quotedConfig("FIREBASE_DATABASE_URL"))
     }
 
     //noinspection WrongGradleMethod
