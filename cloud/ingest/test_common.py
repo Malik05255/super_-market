@@ -78,6 +78,9 @@ class CommonExtractionTests(unittest.TestCase):
         self.assertEqual(normalize_price("SAR 12.50"), Decimal("12.50"))
         self.assertEqual(normalize_price("12٫75 ر.س"), Decimal("12.75"))
         self.assertIsNone(normalize_price("not available"))
+        self.assertIsNone(normalize_price("0"))
+        self.assertIsNone(normalize_price(0))
+        self.assertIsNone(normalize_price("SAR 0.00"))
 
 
 if __name__ == "__main__":
