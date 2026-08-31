@@ -1,0 +1,76 @@
+name: Supermarket Catalog Discovery
+
+on:
+  schedule:
+    # Weekly discovery is deliberately separate from the fast 12-hour price refresh.
+    - cron: "43 1 * * 0"
+  workflow_dispatch:
+    inputs:
+      retailer:
+        description: "Optional retailer slug (leave empty for all)"
+        required: false
+        type: string
+      max_pages:
+        description: "Maximum new fallback pages per retailer"
+        required: false
+        default: "500"
+        type: string
+
+concurrency:
+  group: supermarket-catalog-discovery
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  discover:
+    name: Discover verified GTIN product pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      MAX_PAGE_SOURCES_PER_RETAILER: ${{ inputs.max_pages || '500' }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install discovery dependencies
+        run: python -m pip install --disable-pip-version-check requests beautifulsoup4
+
+      - name: Check canonical cloud configuration
+        id: config
+        shell: bash
+        run: |
+          if [[ -n "$SUPABASE_URL" && -n "$SUPABASE_SERVICE_ROLE_KEY" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Supabase secrets are not configured; discovery is skipped safely."
+          fi
+
+      - name: Discover catalog products
+        if: steps.config.outputs.ready == 'true'
+        shell: bash
+        run: |
+          EXTRA=()
+          if [[ -n "${{ inputs.retailer }}" ]]; then
+            EXTRA+=(--retailer "${{ inputs.retailer }}")
+          fi
+          python cloud/ingest/refresh.py --mode discover \
+            --max-pages "$MAX_PAGE_SOURCES_PER_RETAILER" \
+            "${EXTRA[@]}"
+
+      - name: Discovery summary
+        if: always()
+        run: |
+          echo "### Catalog discovery" >> "$GITHUB_STEP_SUMMARY"
+          echo "Only pages with an unambiguous valid GTIN are accepted." >> "$GITHUB_STEP_SUMMARY"
+          echo "Pages blocked by robots.txt or without a directly verifiable barcode are skipped." >> "$GITHUB_STEP_SUMMARY"
