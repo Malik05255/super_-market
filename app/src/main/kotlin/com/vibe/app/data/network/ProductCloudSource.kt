@@ -1,7 +1,6 @@
 package com.vibe.app.data.network
 
 import com.vibe.app.data.model.ProductSnapshot
-import com.vibe.app.data.model.RetailerOffer
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.okhttp.OkHttp
@@ -12,7 +11,6 @@ import io.ktor.client.request.parameter
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 interface ProductCloudSource {
@@ -105,99 +103,29 @@ class CloudflareProductSource(
     }
 }
 
-class FirestoreProductSource(
-    private val projectId: String,
-    private val apiKey: String,
+class FirebaseRealtimeProductSource(
+    private val databaseUrl: String,
     private val client: HttpClient = ProductCloudHttpClient.client
 ) : ProductCloudSource {
-    override val id: String = "firestore"
-    override val isConfigured: Boolean = projectId.isNotBlank() && apiKey.isNotBlank()
+    override val id: String = "firebase_rtdb"
+    override val isConfigured: Boolean = databaseUrl.isNotBlank()
 
     override suspend fun healthCheck(): Boolean {
         if (!isConfigured) return false
         return runCatching {
-            val url = "https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/product_snapshots"
-            client.get(url) {
-                parameter("key", apiKey)
-                parameter("pageSize", "1")
+            client.get("${databaseUrl.trimEnd('/')}/product_snapshots.json") {
+                parameter("shallow", "true")
+                parameter("limitToFirst", "1")
             }.status.value in 200..299
         }.getOrDefault(false)
     }
 
     override suspend fun lookup(barcode: String): ProductSnapshot? {
         if (!isConfigured) return null
-
-        val url = "https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/product_snapshots/$barcode"
-        val response = client.get(url) {
-            parameter("key", apiKey)
-        }
+        val response = client.get("${databaseUrl.trimEnd('/')}/product_snapshots/$barcode.json")
         if (response.status == HttpStatusCode.NotFound) return null
-        if (response.status.value !in 200..299) error("Firestore lookup failed: ${response.status}")
+        if (response.status.value !in 200..299) error("Firebase lookup failed: ${response.status}")
 
-        val doc = response.body<FirestoreDocument>()
-        return doc.toProduct(barcode)?.copy(cloudSource = id)
+        return response.body<ProductSnapshot?>()?.copy(cloudSource = id)
     }
 }
-
-@Serializable
-private data class FirestoreDocument(
-    val fields: Map<String, FirestoreValue> = emptyMap()
-) {
-    fun toProduct(fallbackBarcode: String): ProductSnapshot? {
-        if (fields.isEmpty()) return null
-        return ProductSnapshot(
-            barcode = fields.string("barcode") ?: fallbackBarcode,
-            nameAr = fields.string("name_ar"),
-            nameEn = fields.string("name_en"),
-            imageUrl = fields.string("image_url"),
-            currentPrice = fields.number("current_price"),
-            currency = fields.string("currency") ?: "SAR",
-            retailer = fields.string("retailer"),
-            priceUpdatedAt = fields.string("price_updated_at") ?: fields.timestamp("price_updated_at"),
-            min30d = fields.number("min_30d"),
-            max30d = fields.number("max_30d"),
-            sourceCount = fields.number("source_count")?.toInt() ?: 1,
-            confidence = fields.number("confidence"),
-            offers = fields["offers"]?.arrayValue?.values.orEmpty().mapNotNull { it.toOffer() }
-        )
-    }
-}
-
-@Serializable
-private data class FirestoreArrayValue(
-    val values: List<FirestoreValue> = emptyList()
-)
-
-@Serializable
-private data class FirestoreMapValue(
-    val fields: Map<String, FirestoreValue> = emptyMap()
-)
-
-@Serializable
-private data class FirestoreValue(
-    val stringValue: String? = null,
-    val integerValue: String? = null,
-    val doubleValue: Double? = null,
-    val timestampValue: String? = null,
-    val arrayValue: FirestoreArrayValue? = null,
-    val mapValue: FirestoreMapValue? = null
-) {
-    fun toOffer(): RetailerOffer? {
-        val map = mapValue?.fields ?: return null
-        val retailer = map.string("retailer") ?: return null
-        val price = map.number("price") ?: return null
-        return RetailerOffer(
-            retailer = retailer,
-            price = price,
-            currency = map.string("currency") ?: "SAR",
-            updatedAt = map.string("updated_at") ?: map.timestamp("updated_at"),
-            branchKey = map.string("branch_key"),
-            sourceUrl = map.string("source_url")
-        )
-    }
-}
-
-private fun Map<String, FirestoreValue>.string(key: String): String? = get(key)?.stringValue
-private fun Map<String, FirestoreValue>.timestamp(key: String): String? = get(key)?.timestampValue
-private fun Map<String, FirestoreValue>.number(key: String): Double? =
-    get(key)?.doubleValue ?: get(key)?.integerValue?.toDoubleOrNull()
