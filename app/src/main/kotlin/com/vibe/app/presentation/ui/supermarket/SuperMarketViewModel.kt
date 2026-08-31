@@ -6,7 +6,7 @@ import com.vibe.app.BuildConfig
 import com.vibe.app.data.model.ProductSnapshot
 import com.vibe.app.data.model.RetailerOffer
 import com.vibe.app.data.network.CloudflareProductSource
-import com.vibe.app.data.network.FirestoreProductSource
+import com.vibe.app.data.network.FirebaseRealtimeProductSource
 import com.vibe.app.data.network.SupabaseProductSource
 import com.vibe.app.data.repository.SuperMarketRepository
 import kotlinx.coroutines.Job
@@ -20,16 +20,15 @@ class SuperMarketViewModel : ViewModel() {
 
     private val repository = SuperMarketRepository(
         listOf(
+            CloudflareProductSource(
+                apiBaseUrl = BuildConfig.CLOUDFLARE_PRODUCTS_URL
+            ),
             SupabaseProductSource(
                 baseUrl = BuildConfig.SUPABASE_URL,
                 anonKey = BuildConfig.SUPABASE_ANON_KEY
             ),
-            CloudflareProductSource(
-                apiBaseUrl = BuildConfig.CLOUDFLARE_PRODUCTS_URL
-            ),
-            FirestoreProductSource(
-                projectId = BuildConfig.FIRESTORE_PROJECT_ID,
-                apiKey = BuildConfig.FIRESTORE_API_KEY
+            FirebaseRealtimeProductSource(
+                databaseUrl = BuildConfig.FIREBASE_DATABASE_URL
             )
         )
     )
@@ -108,9 +107,7 @@ class SuperMarketViewModel : ViewModel() {
                 }
             }
             .groupBy { it.retailer.trim().lowercase() }
-            .mapNotNull { (_, offers) ->
-                offers.maxByOrNull { it.updatedAt.toEpochScore() }
-            }
+            .mapNotNull { (_, offers) -> offers.maxByOrNull { it.updatedAt.toEpochScore() } }
             .sortedBy { it.price }
 
         val currentOffer = mergedOffers.maxByOrNull { it.updatedAt.toEpochScore() }
