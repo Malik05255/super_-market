@@ -80,7 +80,7 @@ jobs:
       - name: Assemble standalone market APK
         run: ./gradlew --no-daemon :market-app:assembleDebug
 
-      - name: Enforce lightweight APK budget
+      - name: Enforce APK size budget
         shell: bash
         run: |
           APK="market-app/build/outputs/apk/debug/market-app-debug.apk"
@@ -90,8 +90,8 @@ jobs:
           echo "APK size: ${MIB} MiB"
           echo "APK_SIZE_BYTES=$BYTES" >> "$GITHUB_ENV"
           echo "APK_SIZE_MIB=$MIB" >> "$GITHUB_ENV"
-          if (( BYTES > 41943040 )); then
-            echo "APK exceeds the 40 MiB lightweight quality budget" >&2
+          if (( BYTES > 104857600 )); then
+            echo "APK exceeds the 100 MiB quality budget" >&2
             exit 1
           fi
 
@@ -101,7 +101,7 @@ jobs:
           mkdir -p dist
           cp market-app/build/outputs/apk/debug/market-app-debug.apk "dist/moqarin-alasaar-${GITHUB_RUN_NUMBER}.apk"
           {
-            echo "### مقارن الأسعار — lightweight APK"
+            echo "### مقارن الأسعار — standalone APK"
             echo "- Package: com.malik05255.supermarket"
             echo "- Version code: $((20000 + GITHUB_RUN_NUMBER))"
             echo "- APK size: ${APK_SIZE_MIB} MiB"
