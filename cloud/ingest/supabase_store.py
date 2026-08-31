@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
-from dataclasses import asdict
 from typing import Any, Iterator
+from urllib.parse import quote
 
 import requests
 
@@ -92,11 +92,8 @@ class SupabaseStore:
             "source_url": source_url,
             "branch_key": branch_key or "online",
             "active": True,
-            "last_checked_at": "now()",
             "last_error": None,
         }
-        # PostgREST does not evaluate now() inside JSON. Remove it; source-status update below sets it.
-        payload.pop("last_checked_at")
         response = self.session.post(
             self._url("retailer_product_sources?on_conflict=retailer_id,source_url"),
             json=payload,
@@ -121,24 +118,50 @@ class SupabaseStore:
         )
         response.raise_for_status()
 
-    def iter_sources(self, retailer_id: int | None = None, page_size: int = 500) -> Iterator[dict[str, Any]]:
+    def source_urls(self, retailer_id: int) -> set[str]:
+        urls: set[str] = set()
+        for row in self.iter_sources(retailer_id=retailer_id):
+            source = row.get("source_url")
+            if source:
+                urls.add(str(source))
+        return urls
+
+    def iter_sources(
+        self,
+        retailer_id: int | None = None,
+        page_size: int = 500,
+        max_items: int | None = None,
+    ) -> Iterator[dict[str, Any]]:
         offset = 0
+        yielded = 0
         while True:
+            limit = page_size
+            if max_items is not None:
+                remaining = max_items - yielded
+                if remaining <= 0:
+                    break
+                limit = min(limit, remaining)
+
             query = (
                 "retailer_product_sources?"
                 "select=id,barcode,retailer_id,source_url,branch_key,active,last_checked_at"
                 "&active=eq.true"
-                f"&limit={page_size}&offset={offset}&order=id.asc"
+                f"&limit={limit}&offset={offset}"
+                "&order=last_checked_at.asc.nullsfirst,id.asc"
             )
             if retailer_id is not None:
                 query += f"&retailer_id=eq.{retailer_id}"
             response = self.session.get(self._url(query), timeout=30)
             response.raise_for_status()
             rows = response.json()
-            yield from rows
-            if len(rows) < page_size:
+            for row in rows:
+                yield row
+                yielded += 1
+                if max_items is not None and yielded >= max_items:
+                    return
+            if len(rows) < limit:
                 break
-            offset += page_size
+            offset += len(rows)
 
     def rebuild_snapshots(self) -> int:
         response = self.session.post(
@@ -157,22 +180,35 @@ class SupabaseStore:
                 return first
             if isinstance(first, dict):
                 return int(next(iter(first.values())))
+        if isinstance(data, dict) and data:
+            return int(next(iter(data.values())))
         return 0
 
-    def changed_snapshots(self, since_iso: str) -> list[dict[str, Any]]:
-        response = self.session.get(
-            self._url(
-                "product_snapshots?select=barcode,payload,payload_hash,updated_at"
-                f"&updated_at=gte.{since_iso}&order=updated_at.asc"
-            ),
-            timeout=60,
-        )
-        response.raise_for_status()
-        return response.json()
+    def changed_snapshots(self, since_iso: str, page_size: int = 1000) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        offset = 0
+        encoded_since = quote(since_iso, safe=":-T.Z+")
+        while True:
+            response = self.session.get(
+                self._url(
+                    "product_snapshots?select=barcode,payload,payload_hash,updated_at"
+                    f"&updated_at=gte.{encoded_since}&order=updated_at.asc"
+                    f"&limit={page_size}&offset={offset}"
+                ),
+                timeout=60,
+            )
+            response.raise_for_status()
+            page = response.json()
+            rows.extend(page)
+            if len(page) < page_size:
+                break
+            offset += len(page)
+        return rows
 
     def system_state(self, key: str) -> dict[str, Any] | None:
+        encoded = quote(key, safe="")
         response = self.session.get(
-            self._url(f"system_state?select=key,value,updated_at&key=eq.{key}&limit=1"),
+            self._url(f"system_state?select=key,value,updated_at&key=eq.{encoded}&limit=1"),
             timeout=30,
         )
         response.raise_for_status()
