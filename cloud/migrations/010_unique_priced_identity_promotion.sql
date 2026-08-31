@@ -33,43 +33,75 @@ security definer
 set search_path = public, private
 as $$
 declare
-    v_source canonical_products%rowtype;
+    v_source_id bigint;
     v_source_verified boolean;
-    v_source_name text;
+    v_source_name_ar text;
+    v_source_name_en text;
+    v_source_brand text;
+    v_source_variant text;
+    v_source_size numeric;
+    v_source_unit text;
+    v_source_pack integer;
+    v_source_image text;
+    v_source_info jsonb;
     v_source_residual text;
     v_candidates bigint[];
     v_target bigint;
 begin
-    select cp.*, pa.verified
-    into v_source, v_source_verified
+    select
+        cp.id,
+        pa.verified,
+        cp.canonical_name_ar,
+        cp.canonical_name_en,
+        cp.brand,
+        cp.variant,
+        cp.net_content_value,
+        cp.net_content_unit,
+        cp.pack_count,
+        cp.image_url,
+        cp.product_info
+    into
+        v_source_id,
+        v_source_verified,
+        v_source_name_ar,
+        v_source_name_en,
+        v_source_brand,
+        v_source_variant,
+        v_source_size,
+        v_source_unit,
+        v_source_pack,
+        v_source_image,
+        v_source_info
     from product_aliases pa
     join canonical_products cp on cp.id = pa.canonical_product_id
     where pa.barcode = p_barcode;
 
-    if v_source.id is null or coalesce(v_source_verified, false) then
+    if v_source_id is null or coalesce(v_source_verified, false) then
         return null;
     end if;
 
-    if nullif(trim(coalesce(v_source.brand, '')), '') is null
-       or v_source.net_content_value is null
-       or nullif(trim(coalesce(v_source.net_content_unit, '')), '') is null then
+    if nullif(trim(coalesce(v_source_brand, '')), '') is null
+       or v_source_size is null
+       or nullif(trim(coalesce(v_source_unit, '')), '') is null then
         return null;
     end if;
 
-    v_source_name := coalesce(v_source.canonical_name_en, v_source.canonical_name_ar, '');
-    v_source_residual := private.identity_residual(v_source_name, v_source.brand);
+    v_source_residual := private.identity_residual(
+        coalesce(v_source_name_en, v_source_name_ar, ''),
+        v_source_brand
+    );
 
     select array_agg(candidate_id order by candidate_id)
     into v_candidates
     from (
         select cp.id as candidate_id
         from canonical_products cp
-        where cp.id <> v_source.id
-          and lower(trim(coalesce(cp.brand, ''))) = lower(trim(v_source.brand))
-          and cp.variant is not distinct from v_source.variant
-          and cp.net_content_value = v_source.net_content_value
-          and lower(trim(coalesce(cp.net_content_unit, ''))) = lower(trim(v_source.net_content_unit))
-          and cp.pack_count = v_source.pack_count
+        where cp.id <> v_source_id
+          and lower(trim(coalesce(cp.brand, ''))) = lower(trim(v_source_brand))
+          and cp.variant is not distinct from v_source_variant
+          and cp.net_content_value = v_source_size
+          and lower(trim(coalesce(cp.net_content_unit, ''))) = lower(trim(v_source_unit))
+          and cp.pack_count = v_source_pack
           and private.identity_residual(
                 coalesce(cp.canonical_name_en, cp.canonical_name_ar, ''),
                 cp.brand
@@ -91,13 +123,13 @@ begin
 
     -- Preserve useful metadata learned from the exact barcode before moving its alias.
     update canonical_products target
-    set canonical_name_ar = coalesce(target.canonical_name_ar, v_source.canonical_name_ar),
-        canonical_name_en = coalesce(target.canonical_name_en, v_source.canonical_name_en),
-        image_url = coalesce(target.image_url, v_source.image_url),
+    set canonical_name_ar = coalesce(target.canonical_name_ar, v_source_name_ar),
+        canonical_name_en = coalesce(target.canonical_name_en, v_source_name_en),
+        image_url = coalesce(target.image_url, v_source_image),
         product_info = case
-            when v_source.product_info is null then target.product_info
-            when target.product_info is null then v_source.product_info
-            else target.product_info || v_source.product_info
+            when v_source_info is null then target.product_info
+            when target.product_info is null then v_source_info
+            else target.product_info || v_source_info
         end,
         updated_at = now()
     where target.id = v_target;
