@@ -103,10 +103,13 @@ def _embedded_product_urls(page_text: str, seed: str, config: dict, pattern: re.
     We intentionally look only for URL-shaped strings and still enforce the retailer's
     host + product path regex. We do not discover or call hidden API endpoints here.
     """
+    # JSON serializers commonly escape URL slashes as `\/`. Normalize that harmless
+    # representation before URL-shape extraction, then run the same host/path guards.
+    normalized_text = html.unescape(page_text).replace("\\/", "/")
     found: list[str] = []
     candidates = re.findall(
         r'''(?:(?:https?:)?//[^"'<>\\\s]+|/[A-Za-z0-9_%?=&+.,:@~!$'()*;\-/]+)''',
-        page_text,
+        normalized_text,
         flags=re.I,
     )
     for raw in candidates:
