@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: "Version name, e.g. 1.0.0"
+        description: "Version name, e.g. 2.0.0"
         required: false
         type: string
   push:
@@ -23,6 +23,10 @@ jobs:
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+      CLOUDFLARE_PRODUCTS_URL: ${{ secrets.CLOUDFLARE_PRODUCTS_URL }}
+      FIREBASE_DATABASE_URL: ${{ secrets.FIREBASE_DATABASE_URL }}
 
     steps:
       - uses: actions/checkout@v5
@@ -50,6 +54,14 @@ jobs:
           printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
           echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
 
+      - name: Require at least one live price cloud
+        shell: bash
+        run: |
+          if [[ -z "$SUPABASE_URL" && -z "$CLOUDFLARE_PRODUCTS_URL" && -z "$FIREBASE_DATABASE_URL" ]]; then
+            echo "At least one product cloud URL must be configured for a release build." >&2
+            exit 1
+          fi
+
       - name: Resolve release version
         shell: bash
         run: |
@@ -58,38 +70,46 @@ jobs:
           elif [[ -n "${{ inputs.version_name }}" ]]; then
             VERSION_NAME="${{ inputs.version_name }}"
           else
-            VERSION_NAME="1.0.${GITHUB_RUN_NUMBER}"
+            VERSION_NAME="2.0.${GITHUB_RUN_NUMBER}"
           fi
           echo "APP_VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
-          echo "APP_VERSION_CODE=$((10000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
-          echo "Resolved version: $VERSION_NAME ($((10000 + GITHUB_RUN_NUMBER)))"
+          echo "APP_VERSION_CODE=$((20000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_ENV"
+          echo "Resolved version: $VERSION_NAME ($((20000 + GITHUB_RUN_NUMBER)))"
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build signed APK and App Bundle
-        run: ./gradlew --no-daemon app:assembleRelease app:bundleRelease
+      - name: Build signed lightweight APK and App Bundle
+        run: ./gradlew --no-daemon :market-app:assembleRelease :market-app:bundleRelease
 
-      - name: Verify signed APK identity
+      - name: Verify signed APK identity and size
         shell: bash
         run: |
-          APK="app/build/outputs/apk/release/app-release.apk"
+          APK="market-app/build/outputs/apk/release/market-app-release.apk"
           test -f "$APK"
           "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner" verify --verbose --print-certs "$APK"
+          BYTES=$(stat -c%s "$APK")
+          LIMIT=$((40 * 1024 * 1024))
+          echo "Release APK size: $BYTES bytes"
+          if (( BYTES > LIMIT )); then
+            echo "Release APK exceeds 40 MiB lightweight-app budget." >&2
+            exit 1
+          fi
 
       - name: Prepare release files
         shell: bash
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk "dist/moqarin-alasaar-${APP_VERSION_NAME}.apk"
-          cp app/build/outputs/bundle/release/app-release.aab "dist/moqarin-alasaar-${APP_VERSION_NAME}.aab"
+          cp market-app/build/outputs/apk/release/market-app-release.apk "dist/moqarin-alasaar-${APP_VERSION_NAME}.apk"
+          cp market-app/build/outputs/bundle/release/market-app-release.aab "dist/moqarin-alasaar-${APP_VERSION_NAME}.aab"
           sha256sum dist/* > dist/SHA256SUMS.txt
           {
             echo "### مقارن الأسعار"
             echo "- Package: com.malik05255.supermarket"
             echo "- Version: ${APP_VERSION_NAME} (${APP_VERSION_CODE})"
+            echo "- Module: market-app (standalone lightweight client)"
             echo "- Signing: stable installer key"
-            echo "- Upgrade behavior: installs over any older build signed with the same key"
+            echo "- Upgrade behavior: installs over any older market-app build signed with the same key"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload workflow artifact
