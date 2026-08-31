@@ -2,6 +2,10 @@
 -- a conservative high-confidence identity key becomes available. Verified/manual
 -- aliases are never moved automatically.
 
+-- Remove the legacy six-argument overload from migration 002. Keeping both is risky
+-- with PostgREST because the modern RPC also has defaults for its later arguments.
+drop function if exists upsert_product_metadata(text, text, text, text, text, boolean);
+
 create or replace function upsert_product_metadata(
     p_barcode text,
     p_name_ar text default null,
