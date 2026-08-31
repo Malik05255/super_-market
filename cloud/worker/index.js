@@ -12,7 +12,18 @@ export default {
     if (url.pathname === "/health") {
       try {
         await env.DB.prepare("SELECT 1 AS ok").first();
-        return json({ ok: true }, 200, { "Cache-Control": "no-store" });
+        const state = await env.DB
+          .prepare("SELECT value, updated_at FROM system_state WHERE key = 'last_price_refresh' LIMIT 1")
+          .first();
+        return json(
+          {
+            ok: true,
+            last_price_refresh: state?.value ? JSON.parse(state.value) : null,
+            state_updated_at: state?.updated_at || null
+          },
+          200,
+          { "Cache-Control": "no-store" }
+        );
       } catch {
         return json({ ok: false }, 503, { "Cache-Control": "no-store" });
       }
@@ -31,7 +42,7 @@ export default {
 
     try {
       const row = await env.DB
-        .prepare("SELECT payload, updated_at, fresh_until FROM product_snapshots WHERE barcode = ? LIMIT 1")
+        .prepare("SELECT payload, updated_at FROM product_snapshots WHERE barcode = ? LIMIT 1")
         .bind(barcode)
         .first();
 
@@ -42,20 +53,18 @@ export default {
           200,
           {
             "Cache-Control": "public, max-age=300, stale-while-revalidate=21600",
-            "X-Data-Updated-At": row.updated_at || "",
-            "X-Data-Fresh-Until": row.fresh_until || ""
+            "X-Snapshot-Changed-At": row.updated_at || ""
           }
         );
         ctx.waitUntil(cache.put(cacheKey, response.clone()));
         return response;
       }
     } catch {
-      // If D1 is temporarily unavailable, let the Android client race the other clouds.
+      // The Android client is racing Supabase and Firebase at the same time.
       return json({ error: "cloud_unavailable" }, 503, { "Cache-Control": "no-store" });
     }
 
-    // Metadata-only fallback for a barcode not yet present in our catalog.
-    // Never invents or sources a supermarket price.
+    // Metadata-only fallback for a new barcode. This never invents a supermarket price.
     const metadata = await lookupOpenFoodFacts(barcode);
     if (!metadata) {
       return json({ error: "product_not_found", barcode }, 404, {
