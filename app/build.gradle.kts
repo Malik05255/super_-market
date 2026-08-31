@@ -28,6 +28,20 @@ android {
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi")
         }
+
+        fun quotedConfig(name: String): String {
+            val raw = providers.gradleProperty(name)
+                .orElse(providers.environmentVariable(name))
+                .orElse("")
+                .get()
+            return "\"${raw.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+        }
+
+        buildConfigField("String", "SUPABASE_URL", quotedConfig("SUPABASE_URL"))
+        buildConfigField("String", "SUPABASE_ANON_KEY", quotedConfig("SUPABASE_ANON_KEY"))
+        buildConfigField("String", "CLOUDFLARE_PRODUCTS_URL", quotedConfig("CLOUDFLARE_PRODUCTS_URL"))
+        buildConfigField("String", "FIRESTORE_PROJECT_ID", quotedConfig("FIRESTORE_PROJECT_ID"))
+        buildConfigField("String", "FIRESTORE_API_KEY", quotedConfig("FIRESTORE_API_KEY"))
     }
 
     //noinspection WrongGradleMethod
@@ -120,6 +134,9 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.coil.compose)
+
+    // Barcode scanner: Google Code Scanner provides fast scanning without camera permission.
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 
     // SplashScreen
     implementation(libs.splashscreen)
