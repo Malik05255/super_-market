@@ -42,13 +42,14 @@ android {
         fun quotedConfig(name: String, fallback: String = ""): String {
             val raw = providers.gradleProperty(name)
                 .orElse(providers.environmentVariable(name))
-                .orElse(fallback)
+                .orElse("")
                 .get()
+                .ifBlank { fallback }
             return "\"${raw.replace("\\", "\\\\").replace("\"", "\\\"")}\""
         }
 
         // Publishable client credentials are safe to ship with an RLS-protected read-only API.
-        // CI/environment values still override these defaults when configured.
+        // CI/environment values override these defaults only when they are non-blank.
         buildConfigField(
             "String",
             "SUPABASE_URL",
