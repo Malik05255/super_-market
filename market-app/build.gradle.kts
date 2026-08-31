@@ -39,16 +39,26 @@ android {
         versionCode = resolvedVersionCode
         versionName = resolvedVersionName
 
-        fun quotedConfig(name: String): String {
+        fun quotedConfig(name: String, fallback: String = ""): String {
             val raw = providers.gradleProperty(name)
                 .orElse(providers.environmentVariable(name))
-                .orElse("")
+                .orElse(fallback)
                 .get()
             return "\"${raw.replace("\\", "\\\\").replace("\"", "\\\"")}\""
         }
 
-        buildConfigField("String", "SUPABASE_URL", quotedConfig("SUPABASE_URL"))
-        buildConfigField("String", "SUPABASE_ANON_KEY", quotedConfig("SUPABASE_ANON_KEY"))
+        // Publishable client credentials are safe to ship with an RLS-protected read-only API.
+        // CI/environment values still override these defaults when configured.
+        buildConfigField(
+            "String",
+            "SUPABASE_URL",
+            quotedConfig("SUPABASE_URL", "https://lbgcjmsqqhrpceijdqng.supabase.co")
+        )
+        buildConfigField(
+            "String",
+            "SUPABASE_ANON_KEY",
+            quotedConfig("SUPABASE_ANON_KEY", "sb_publishable_TllPSeKhRJx_IegHMxkZmA_Q9FLBUR_")
+        )
         buildConfigField("String", "CLOUDFLARE_PRODUCTS_URL", quotedConfig("CLOUDFLARE_PRODUCTS_URL"))
         buildConfigField("String", "FIREBASE_DATABASE_URL", quotedConfig("FIREBASE_DATABASE_URL"))
     }
