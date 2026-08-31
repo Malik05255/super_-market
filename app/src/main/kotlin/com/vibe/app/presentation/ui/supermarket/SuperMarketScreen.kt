@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.Image
@@ -22,6 +24,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -44,6 +47,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.AsyncImage
 import com.google.android.gms.mlkit.barcode.GmsBarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
+import com.vibe.app.data.model.RetailerOffer
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,6 +55,7 @@ fun SuperMarketScreen(
     viewModel: SuperMarketViewModel = viewModel()
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val healthyClouds by viewModel.healthyClouds.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scannerOptions = remember {
         com.google.android.gms.mlkit.barcode.GmsBarcodeScannerOptions.Builder()
@@ -74,6 +79,7 @@ fun SuperMarketScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues)
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp, vertical = 18.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -83,10 +89,18 @@ fun SuperMarketScreen(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = "امسح الباركود لمعرفة أحدث سعر موثوق",
+                    text = "امسح الباركود وشاهد أسعار المنتج في المتاجر",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (viewModel.configuredClouds > 0) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = "السحابات الجاهزة: $healthyClouds من ${viewModel.configuredClouds}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
 
                 Spacer(Modifier.height(22.dp))
 
@@ -112,6 +126,7 @@ fun SuperMarketScreen(
 
                 Spacer(Modifier.height(20.dp))
                 ResultPanel(state)
+                Spacer(Modifier.height(28.dp))
             }
         }
     }
@@ -175,11 +190,11 @@ private fun ResultPanel(state: SuperMarketUiState) {
             is SuperMarketUiState.Found -> ProductResult(state)
             is SuperMarketUiState.NotFound -> MessageContent(
                 title = "المنتج غير موجود بعد",
-                body = "الباركود ${state.barcode} لم يرجع نتيجة من السحابات المتصلة."
+                body = "الباركود ${state.barcode} لم يرجع نتيجة موثوقة من السحابات المتصلة."
             )
             is SuperMarketUiState.ConfigurationMissing -> MessageContent(
                 title = "السحابات غير مربوطة بعد",
-                body = "قارئ الباركود يعمل. بقي وضع مفاتيح السحابات الثلاث لتفعيل الأسعار الحقيقية."
+                body = "قارئ الباركود يعمل. بقي ربط السحابات المجانية لتفعيل الأسعار الحقيقية."
             )
             is SuperMarketUiState.Error -> MessageContent(
                 title = "تعذر إكمال القراءة",
@@ -208,7 +223,7 @@ private fun LoadingContent(barcode: String) {
     ) {
         CircularProgressIndicator(modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
         Column {
-            Text("جارٍ جلب أحدث سعر...", fontWeight = FontWeight.Bold)
+            Text("جارٍ قراءة النسخة المحدثة من السحابة...", fontWeight = FontWeight.Bold)
             Text(barcode, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -231,7 +246,7 @@ private fun ProductResult(state: SuperMarketUiState.Found) {
 
         Spacer(Modifier.height(18.dp))
 
-        Text("أحدث سعر", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("أحدث سعر مرصود", color = MaterialTheme.colorScheme.onSurfaceVariant)
         AnimatedContent(targetState = product.currentPrice, label = "current-price") { price ->
             Text(
                 text = price?.let { String.format("%.2f %s", it, product.currency) } ?: "غير متوفر",
@@ -270,6 +285,27 @@ private fun ProductResult(state: SuperMarketUiState.Found) {
             )
         }
 
+        if (product.offers.isNotEmpty()) {
+            Spacer(Modifier.height(22.dp))
+            Text(
+                text = "أسعار السوبرماركت",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "مرتبة من الأرخص إلى الأعلى",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(8.dp))
+            product.offers.forEachIndexed { index, offer ->
+                RetailerPriceRow(offer)
+                if (index != product.offers.lastIndex) {
+                    HorizontalDivider()
+                }
+            }
+        }
+
         Spacer(Modifier.height(14.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(
@@ -285,6 +321,33 @@ private fun ProductResult(state: SuperMarketUiState.Found) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
+}
+
+@Composable
+private fun RetailerPriceRow(offer: RetailerOffer) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(offer.retailer, fontWeight = FontWeight.SemiBold)
+            offer.updatedAt?.let {
+                Text(
+                    text = "تحديث $it",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+        Text(
+            text = String.format("%.2f %s", offer.price, offer.currency),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 
