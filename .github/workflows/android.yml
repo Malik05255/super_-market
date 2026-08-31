@@ -45,10 +45,15 @@ jobs:
         run: python -m unittest -v test_product_identity.py
 
   assemble-debug:
-    name: Assemble Debug
+    name: Assemble Upgradeable APK
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v5
       - name: Set up JDK 17
@@ -57,10 +62,51 @@ jobs:
           java-version: "17"
           distribution: "temurin"
           cache: gradle
+
+      - name: Prepare stable installer signing
+        shell: bash
+        run: |
+          if [[ -n "$ANDROID_KEYSTORE_BASE64" && -n "$ANDROID_KEYSTORE_PASSWORD" && -n "$ANDROID_KEY_ALIAS" && -n "$ANDROID_KEY_PASSWORD" ]]; then
+            KEYSTORE_PATH="$RUNNER_TEMP/supermarket-installer.jks"
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+            echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+            echo "Stable signing: enabled. APKs signed with this key can update older builds signed by the same key."
+            echo "SIGNING_MODE=stable" >> "$GITHUB_ENV"
+          else
+            echo "Stable signing secrets are not configured. CI will fall back to an ephemeral debug key."
+            echo "SIGNING_MODE=ephemeral-debug" >> "$GITHUB_ENV"
+          fi
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
+
       - name: Assemble debug APK
         run: ./gradlew --no-daemon app:assembleDebug
+
+      - name: Prepare install artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/moqarin-alasaar-${GITHUB_RUN_NUMBER}.apk"
+          {
+            echo "### Android install artifact"
+            echo "- Package: com.malik05255.supermarket"
+            echo "- Version code: $((10000 + GITHUB_RUN_NUMBER))"
+            echo "- Signing mode: $SIGNING_MODE"
+            if [[ "$SIGNING_MODE" == "stable" ]]; then
+              echo "- In-place update: enabled for previous APKs signed with the same key"
+            else
+              echo "- In-place update: not guaranteed until stable signing secrets are configured"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: moqarin-alasaar-${{ github.run_number }}
+          path: dist/*.apk
+          if-no-files-found: error
+          retention-days: 30
 
   unit-tests:
     name: Unit Tests
