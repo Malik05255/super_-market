@@ -4,6 +4,16 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
+data class RetailerOffer(
+    val retailer: String,
+    val price: Double,
+    val currency: String = "SAR",
+    @SerialName("updated_at") val updatedAt: String? = null,
+    @SerialName("branch_key") val branchKey: String? = null,
+    @SerialName("source_url") val sourceUrl: String? = null
+)
+
+@Serializable
 data class ProductSnapshot(
     val barcode: String,
     @SerialName("name_ar") val nameAr: String? = null,
@@ -17,6 +27,7 @@ data class ProductSnapshot(
     @SerialName("max_30d") val max30d: Double? = null,
     @SerialName("source_count") val sourceCount: Int = 1,
     val confidence: Double? = null,
+    val offers: List<RetailerOffer> = emptyList(),
     @SerialName("cloud_source") val cloudSource: String? = null
 ) {
     val displayName: String
