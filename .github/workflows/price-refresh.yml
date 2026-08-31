@@ -32,6 +32,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CLOUDFLARE_D1_DATABASE_NAME: ${{ secrets.CLOUDFLARE_D1_DATABASE_NAME }}
       MAX_PAGE_SOURCES_PER_RETAILER: "800"
+      MAX_SEED_PRODUCT_LINKS_PER_RETAILER: "600"
       REPLICA_SYNC_LOOKBACK_HOURS: "14"
 
     steps:
@@ -99,7 +100,7 @@ jobs:
           if [[ -n "${{ inputs.retailer }}" ]]; then
             EXTRA+=(--retailer "${{ inputs.retailer }}")
           fi
-          python cloud/ingest/refresh.py --mode refresh "${EXTRA[@]}"
+          python cloud/ingest/refresh_v2.py --mode refresh "${EXTRA[@]}"
 
       - name: Build replica delta and sync Firebase
         if: steps.config.outputs.ready == 'true'
@@ -127,6 +128,7 @@ jobs:
         run: |
           echo "### Supermarket refresh" >> "$GITHUB_STEP_SUMMARY"
           echo "- Product identity tests: required before refresh" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Public sitemap/robots discovery: enabled" >> "$GITHUB_STEP_SUMMARY"
           if [[ "${{ steps.config.outputs.ready }}" != "true" ]]; then
             echo "- Status: Supabase not configured yet" >> "$GITHUB_STEP_SUMMARY"
           else
