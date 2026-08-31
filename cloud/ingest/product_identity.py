@@ -121,12 +121,30 @@ def _brand(product: ExtractedProduct) -> str:
 
 
 def _name_tokens(product: ExtractedProduct, brand: str) -> list[str]:
-    name = _normalize(product.name_en or product.name_ar)
-    tokens = []
+    # Remove structured identity fields before producing the residual family fingerprint.
+    # This makes "330ml" and "330 ml" identical and keeps packaging order irrelevant.
+    raw_name = product.name_en or product.name_ar or ""
+    stripped = raw_name
+    for pattern, _, _ in SIZE_PATTERNS:
+        stripped = pattern.sub(" ", stripped)
+    for pattern in PACK_PATTERNS:
+        stripped = pattern.sub(" ", stripped)
+
+    name = _normalize(stripped)
+    brand_tokens = set(brand.split())
+    variant_tokens = {
+        _normalize(value)
+        for synonyms in VARIANT_GROUPS.values()
+        for value in synonyms
+    }
+
+    tokens: list[str] = []
     for token in name.split():
         if token in STOP_TOKENS:
             continue
-        if token == brand:
+        if token in brand_tokens:
+            continue
+        if token in variant_tokens:
             continue
         if token.isdigit():
             continue
@@ -157,8 +175,6 @@ def derive_identity(product: ExtractedProduct) -> ProductIdentity:
         )
 
     name_tokens = _name_tokens(product, normalized_brand)
-    # Keep a compact stable product-family signal. If no useful product token remains,
-    # do not merge automatically even when brand and size match.
     family_tokens = sorted(set(name_tokens))[:6]
     if not family_tokens and variant is None:
         return ProductIdentity(
