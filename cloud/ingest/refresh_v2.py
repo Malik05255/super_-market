@@ -6,15 +6,17 @@ This wrapper deliberately stays on public, robots-allowed pages. It augments the
 existing refresh.py discovery with:
 - Sitemap URLs advertised in robots.txt.
 - Conventional sitemap.xml / sitemap_index.xml fallbacks.
-- A small set of public catalog seed pages for retailers that do not publish a sitemap.
+- Public catalog seed pages for retailers that do not publish a sitemap.
+- Product links embedded in storefront JSON/JavaScript state.
 
 No authenticated/private endpoints are used.
 """
 
+import html
 import os
 import re
 import sys
-from urllib.parse import urljoin, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -79,6 +81,41 @@ def _working_sitemaps(session: requests.Session, config: dict) -> list[str]:
     return working
 
 
+def _normalize_candidate(raw: str, seed: str, config: dict, pattern: re.Pattern[str]) -> str | None:
+    value = html.unescape(raw.strip()).replace("\\/", "/")
+    value = unquote(value)
+    if not value or value.startswith(("javascript:", "mailto:", "tel:")):
+        return None
+    href = urljoin(seed, value)
+    parsed = urlparse(href)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    if _host(href) != _host(config["base_url"]):
+        return None
+    if not pattern.search(parsed.path):
+        return None
+    return parsed._replace(fragment="").geturl()
+
+
+def _embedded_product_urls(page_text: str, seed: str, config: dict, pattern: re.Pattern[str]) -> list[str]:
+    """Extract public product URLs carried in serialized storefront state.
+
+    We intentionally look only for URL-shaped strings and still enforce the retailer's
+    host + product path regex. We do not discover or call hidden API endpoints here.
+    """
+    found: list[str] = []
+    candidates = re.findall(
+        r'''(?:(?:https?:)?//[^"'<>\\\s]+|/[A-Za-z0-9_%?=&+.,:@~!$'()*;\-/]+)''',
+        page_text,
+        flags=re.I,
+    )
+    for raw in candidates:
+        candidate = _normalize_candidate(raw, seed, config, pattern)
+        if candidate and candidate not in found:
+            found.append(candidate)
+    return found
+
+
 def _seed_product_urls(session: requests.Session, config: dict) -> list[str]:
     seeds = list(config.get("catalog_seed_urls") or [])
     if not seeds:
@@ -86,7 +123,7 @@ def _seed_product_urls(session: requests.Session, config: dict) -> list[str]:
 
     pattern = re.compile(config.get("product_url_regex") or r".", re.I)
     robots = RobotsCache(session)
-    max_links = max(1, int(os.environ.get("MAX_SEED_PRODUCT_LINKS_PER_RETAILER", "600")))
+    max_links = max(1, int(os.environ.get("MAX_SEED_PRODUCT_LINKS_PER_RETAILER", "1200")))
     product_urls: list[str] = []
 
     for seed in seeds:
@@ -103,17 +140,15 @@ def _seed_product_urls(session: requests.Session, config: dict) -> list[str]:
             continue
 
         soup = BeautifulSoup(response.text, "html.parser")
+        page_candidates: list[str] = []
         for anchor in soup.find_all("a", href=True):
-            href = urljoin(seed, str(anchor.get("href") or "").strip())
-            parsed = urlparse(href)
-            if parsed.scheme not in {"http", "https"}:
-                continue
-            if _host(href) != _host(config["base_url"]):
-                continue
-            # Strip fragments; retain meaningful query strings because some storefronts
-            # use them to identify the selected store/offer.
-            href = parsed._replace(fragment="").geturl()
-            if pattern.search(parsed.path) and href not in product_urls:
+            candidate = _normalize_candidate(str(anchor.get("href") or ""), seed, config, pattern)
+            if candidate:
+                page_candidates.append(candidate)
+
+        page_candidates.extend(_embedded_product_urls(response.text, seed, config, pattern))
+        for href in page_candidates:
+            if href not in product_urls:
                 product_urls.append(href)
                 if len(product_urls) >= max_links:
                     break
