@@ -25,7 +25,6 @@ PACK_PATTERNS = [
     re.compile(r"(?<!\d)(\d{1,3})\s*(?:pack|pk|pcs|pieces|حبة|حبات|عبوة|عبوات)(?!\w)", re.I),
 ]
 
-# Words that describe packaging/marketing rather than product variant.
 STOP_TOKENS = {
     "can", "cans", "bottle", "bottles", "pet", "pack", "packs", "piece", "pieces",
     "ml", "ltr", "liter", "litre", "g", "gm", "gram", "kg",
@@ -33,7 +32,6 @@ STOP_TOKENS = {
     "مل", "لتر", "جرام", "غرام", "كيلو", "كجم",
 }
 
-# High-signal variant terms. This list prevents merging e.g. regular with diet/zero.
 VARIANT_GROUPS = {
     "zero": {"zero", "زيرو", "صفر"},
     "diet": {"diet", "دايت", "حمية"},
@@ -72,6 +70,14 @@ def _parse_decimal(raw: str) -> Decimal | None:
         return Decimal(raw.replace(",", "."))
     except InvalidOperation:
         return None
+
+
+def _portable_decimal(value: Decimal) -> str:
+    """Stable plain-decimal representation shared with the TypeScript edge crawler."""
+    rendered = format(value.normalize(), "f")
+    if "." in rendered:
+        rendered = rendered.rstrip("0").rstrip(".")
+    return rendered or "0"
 
 
 def _extract_size(text: str) -> tuple[Decimal | None, str | None]:
@@ -121,8 +127,6 @@ def _brand(product: ExtractedProduct) -> str:
 
 
 def _name_tokens(product: ExtractedProduct, brand: str) -> list[str]:
-    # Remove structured identity fields before producing the residual family fingerprint.
-    # This makes "330ml" and "330 ml" identical and keeps packaging order irrelevant.
     raw_name = product.name_en or product.name_ar or ""
     stripped = raw_name
     for pattern, _, _ in SIZE_PATTERNS:
@@ -161,8 +165,6 @@ def derive_identity(product: ExtractedProduct) -> ProductIdentity:
     pack_count = _extract_pack_count(text)
     variant = _variant(text)
 
-    # Cross-barcode auto-linking is deliberately strict. Brand and explicit size are mandatory.
-    # Name/variant fingerprint is additional protection against regular/diet/flavor collisions.
     if not normalized_brand or size_value is None or size_unit is None:
         return ProductIdentity(
             identity_key=None,
@@ -191,7 +193,7 @@ def derive_identity(product: ExtractedProduct) -> ProductIdentity:
         [
             normalized_brand,
             variant or "standard",
-            f"{size_value.normalize()}:{size_unit}",
+            f"{_portable_decimal(size_value)}:{size_unit}",
             str(pack_count),
             ",".join(family_tokens),
         ]
@@ -199,11 +201,11 @@ def derive_identity(product: ExtractedProduct) -> ProductIdentity:
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
     confidence = 0.96 if variant else 0.92
     return ProductIdentity(
-        identity_key=f"v1:{digest}",
+        identity_key=f"v2:{digest}",
         variant=variant,
         net_content_value=size_value,
         net_content_unit=size_unit,
         pack_count=pack_count,
         confidence=confidence,
-        method="brand_variant_size_pack_family",
+        method="brand_variant_size_pack_family_v2",
     )
