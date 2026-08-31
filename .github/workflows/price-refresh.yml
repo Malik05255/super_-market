@@ -1,0 +1,96 @@
+name: Supermarket Price Refresh
+
+on:
+  schedule:
+    # Twice daily. Riyadh: approximately 03:17 and 15:17.
+    - cron: "17 */12 * * *"
+  workflow_dispatch:
+    inputs:
+      retailer:
+        description: "Optional retailer slug (leave empty for all)"
+        required: false
+        type: string
+
+concurrency:
+  group: supermarket-price-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    name: Refresh prices and replicas
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      FIREBASE_DATABASE_URL: ${{ secrets.FIREBASE_DATABASE_URL }}
+      FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_D1_DATABASE_NAME: ${{ secrets.CLOUDFLARE_D1_DATABASE_NAME }}
+      MAX_PAGE_SOURCES_PER_RETAILER: "800"
+      REPLICA_SYNC_LOOKBACK_HOURS: "14"
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install refresh dependencies
+        run: python -m pip install --disable-pip-version-check requests beautifulsoup4 google-auth
+
+      - name: Check canonical cloud configuration
+        id: config
+        shell: bash
+        run: |
+          if [[ -n "$SUPABASE_URL" && -n "$SUPABASE_SERVICE_ROLE_KEY" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Supabase secrets are not configured; refresh is skipped safely."
+          fi
+
+      - name: Refresh retailer prices
+        if: steps.config.outputs.ready == 'true'
+        shell: bash
+        run: |
+          EXTRA=()
+          if [[ -n "${{ inputs.retailer }}" ]]; then
+            EXTRA+=(--retailer "${{ inputs.retailer }}")
+          fi
+          python cloud/ingest/refresh.py --mode refresh "${EXTRA[@]}"
+
+      - name: Build replica delta and sync Firebase
+        if: steps.config.outputs.ready == 'true'
+        run: python cloud/ingest/sync_replicas.py
+
+      - name: Apply changed snapshots to Cloudflare D1
+        if: steps.config.outputs.ready == 'true'
+        shell: bash
+        run: |
+          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" || -z "$CLOUDFLARE_D1_DATABASE_NAME" ]]; then
+            echo "Cloudflare D1 secrets are not configured; D1 sync is skipped safely."
+            exit 0
+          fi
+          npx --yes wrangler@4 d1 execute "$CLOUDFLARE_D1_DATABASE_NAME" \
+            --remote \
+            --file=cloud/.generated/d1-sync.sql
+
+      - name: Refresh summary
+        if: always()
+        run: |
+          echo "### Supermarket refresh" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ steps.config.outputs.ready }}" != "true" ]]; then
+            echo "- Status: not configured yet" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- Canonical refresh: attempted" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Firebase: synchronized when credentials are present" >> "$GITHUB_STEP_SUMMARY"
+            echo "- D1: synchronized when credentials are present" >> "$GITHUB_STEP_SUMMARY"
+          fi
