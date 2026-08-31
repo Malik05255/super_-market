@@ -20,7 +20,6 @@ GTIN_KEYS = {
     "gtin", "gtin8", "gtin12", "gtin13", "gtin14", "barcode", "bar_code",
     "ean", "ean8", "ean13", "upc", "upca", "upc_a",
 }
-PRICE_KEYS = {"price", "lowprice", "highprice", "saleprice", "finalprice", "currentprice"}
 
 
 @dataclass(frozen=True)
@@ -163,15 +162,20 @@ def _json_ld_products(soup: BeautifulSoup) -> list[dict[str, Any]]:
     return products
 
 
-def _candidate_barcodes(product: dict[str, Any], html_text: str) -> set[str]:
+def _product_barcodes(product: dict[str, Any]) -> set[str]:
+    """GTINs structurally contained in one Product object only."""
     candidates: set[str] = set()
     for key, value in _walk_json(product):
         if key in GTIN_KEYS and isinstance(value, (str, int)):
             gtin = valid_gtin(value)
             if gtin:
                 candidates.add(gtin)
+    return candidates
 
-    # Embedded app state often carries a direct key named barcode/ean/upc/gtin.
+
+def _embedded_page_barcodes(html_text: str) -> set[str]:
+    """Explicit GTIN-like keys in serialized page state, not bound to a Product object."""
+    candidates: set[str] = set()
     patterns = [
         r'"(?:gtin(?:8|12|13|14)?|barcode|bar_code|ean(?:8|13)?|upc|upca|upc_a)"\s*:\s*"?(\d{8,14})"?',
         r"'(?:gtin(?:8|12|13|14)?|barcode|bar_code|ean(?:8|13)?|upc|upca|upc_a)'\s*:\s*'?(\d{8,14})'?",
@@ -235,41 +239,66 @@ def _image(product: dict[str, Any], soup: BeautifulSoup, base_url: str) -> str |
     return None
 
 
+def _select_product(
+    products: list[dict[str, Any]],
+    embedded_barcodes: set[str],
+    expected_barcode: str | None,
+) -> tuple[str, dict[str, Any], bool] | None:
+    """Return (barcode, selected Product object, page_meta_is_safe).
+
+    Product-local GTIN evidence always wins. Global embedded state is accepted only when
+    there is at most one Product object, because otherwise the barcode-to-product link is
+    structurally ambiguous.
+    """
+    product_pairs = [(product, _product_barcodes(product)) for product in products]
+
+    if expected_barcode is not None:
+        expected = valid_gtin(expected_barcode)
+        if not expected:
+            return None
+
+        direct_matches = [product for product, codes in product_pairs if expected in codes]
+        if direct_matches:
+            # A product-local GTIN is strong enough even when recommendation Product objects exist.
+            return expected, direct_matches[0], len(products) == 1
+
+        # No Product object claims the expected GTIN. Fall back to page-global state only
+        # when that state cannot refer to one of several Product objects.
+        if expected in embedded_barcodes and len(products) <= 1:
+            return expected, products[0] if products else {}, True
+        return None
+
+    direct_codes = {code for _, codes in product_pairs for code in codes}
+    if len(direct_codes) == 1:
+        barcode = next(iter(direct_codes))
+        selected = next(product for product, codes in product_pairs if barcode in codes)
+        return barcode, selected, len(products) == 1
+    if direct_codes:
+        # More than one valid product-local GTIN on the page: discovery is ambiguous.
+        return None
+
+    if len(embedded_barcodes) == 1 and len(products) <= 1:
+        return next(iter(embedded_barcodes)), products[0] if products else {}, True
+    return None
+
+
 def extract_product(html: str, source_url: str, expected_barcode: str | None = None) -> ExtractedProduct | None:
     soup = BeautifulSoup(html, "html.parser")
     products = _json_ld_products(soup)
-    page_candidates: set[str] = set()
-    for product in products:
-        page_candidates |= _candidate_barcodes(product, html)
+    embedded_barcodes = _embedded_page_barcodes(html)
+    selected_result = _select_product(products, embedded_barcodes, expected_barcode)
+    if selected_result is None:
+        return None
 
-    # If JSON-LD is absent, still inspect embedded application state for explicit GTIN keys.
-    if not products:
-        page_candidates |= _candidate_barcodes({}, html)
-
-    if expected_barcode:
-        expected = valid_gtin(expected_barcode)
-        if not expected or expected not in page_candidates:
-            return None
-        barcode = expected
-    else:
-        # Discovery requires an unambiguous direct GTIN. Do not guess by SKU/title/size.
-        if len(page_candidates) != 1:
-            return None
-        barcode = next(iter(page_candidates))
-
-    selected = products[0] if products else {}
-    for product in products:
-        if barcode in _candidate_barcodes(product, html):
-            selected = product
-            break
-
+    barcode, selected, page_meta_is_safe = selected_result
     name = _clean_text(selected.get("name"))
     name_ar = name if name and ARABIC_RE.search(name) else None
     name_en = name if name and not ARABIC_RE.search(name) else None
     price, currency = _best_offer(selected)
 
-    if price is None:
-        # Standards-based metadata fallbacks only; avoid generic numeric scraping.
+    if price is None and page_meta_is_safe:
+        # Page-level price metadata is safe only when there is at most one Product object.
+        # With recommendations/multiple products it could describe a different item.
         for selector in [
             ('meta[property="product:price:amount"]', "content"),
             ('meta[itemprop="price"]', "content"),
@@ -280,7 +309,7 @@ def extract_product(html: str, source_url: str, expected_barcode: str | None = N
                 if price is not None:
                     break
     currency_node = soup.select_one('meta[property="product:price:currency"], meta[itemprop="priceCurrency"]')
-    if currency_node and currency_node.get("content"):
+    if page_meta_is_safe and currency_node and currency_node.get("content"):
         currency = str(currency_node["content"]).upper()
 
     return ExtractedProduct(
