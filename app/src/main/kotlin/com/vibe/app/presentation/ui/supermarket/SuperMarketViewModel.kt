@@ -1,25 +1,40 @@
 package com.vibe.app.presentation.ui.supermarket
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.room.Room
 import com.vibe.app.BuildConfig
+import com.vibe.app.data.database.ProductCacheDatabase
 import com.vibe.app.data.model.ProductSnapshot
 import com.vibe.app.data.model.RetailerOffer
 import com.vibe.app.data.network.CloudflareProductSource
 import com.vibe.app.data.network.FirebaseRealtimeProductSource
 import com.vibe.app.data.network.SupabaseProductSource
 import com.vibe.app.data.repository.SuperMarketRepository
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.time.Instant
+import javax.inject.Inject
 
-class SuperMarketViewModel : ViewModel() {
+@HiltViewModel
+class SuperMarketViewModel @Inject constructor(
+    @ApplicationContext context: Context
+) : ViewModel() {
+
+    private val cacheDatabase = Room.databaseBuilder(
+        context,
+        ProductCacheDatabase::class.java,
+        "supermarket-product-cache.db"
+    ).build()
 
     private val repository = SuperMarketRepository(
-        listOf(
+        sources = listOf(
             CloudflareProductSource(
                 apiBaseUrl = BuildConfig.CLOUDFLARE_PRODUCTS_URL
             ),
@@ -30,7 +45,8 @@ class SuperMarketViewModel : ViewModel() {
             FirebaseRealtimeProductSource(
                 databaseUrl = BuildConfig.FIREBASE_DATABASE_URL
             )
-        )
+        ),
+        cacheDao = cacheDatabase.productSnapshotCacheDao()
     )
 
     private val _uiState = MutableStateFlow<SuperMarketUiState>(SuperMarketUiState.Idle)
@@ -48,6 +64,11 @@ class SuperMarketViewModel : ViewModel() {
         viewModelScope.launch {
             _healthyClouds.value = repository.prewarm()
         }
+    }
+
+    override fun onCleared() {
+        cacheDatabase.close()
+        super.onCleared()
     }
 
     fun lookupBarcode(rawValue: String?) {
@@ -74,8 +95,15 @@ class SuperMarketViewModel : ViewModel() {
                 results += product
                 _uiState.value = SuperMarketUiState.Found(
                     product = mergeResults(barcode, results),
-                    cloudResponses = results.mapNotNull { it.cloudSource }.distinct().size,
-                    cloudTotal = repository.configuredSourceCount
+                    cloudResponses = results
+                        .mapNotNull { it.cloudSource }
+                        .filterNot { it == SuperMarketRepository.LOCAL_CACHE_SOURCE }
+                        .distinct()
+                        .size,
+                    cloudTotal = repository.configuredSourceCount,
+                    servedFromCache = results.any {
+                        it.cloudSource == SuperMarketRepository.LOCAL_CACHE_SOURCE
+                    }
                 )
             }
 
@@ -95,6 +123,9 @@ class SuperMarketViewModel : ViewModel() {
         val priced = results.filter { it.currentPrice != null }
         val freshest = priced.maxByOrNull { it.priceUpdatedAt.toEpochScore() } ?: results.first()
         val metadata = results.firstOrNull {
+            it.cloudSource != SuperMarketRepository.LOCAL_CACHE_SOURCE &&
+                (!it.nameAr.isNullOrBlank() || !it.nameEn.isNullOrBlank() || !it.imageUrl.isNullOrBlank())
+        } ?: results.firstOrNull {
             !it.nameAr.isNullOrBlank() || !it.nameEn.isNullOrBlank() || !it.imageUrl.isNullOrBlank()
         } ?: freshest
 
@@ -155,7 +186,8 @@ sealed interface SuperMarketUiState {
     data class Found(
         val product: ProductSnapshot,
         val cloudResponses: Int,
-        val cloudTotal: Int
+        val cloudTotal: Int,
+        val servedFromCache: Boolean
     ) : SuperMarketUiState
     data class NotFound(val barcode: String) : SuperMarketUiState
     data class ConfigurationMissing(val barcode: String) : SuperMarketUiState
