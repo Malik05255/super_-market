@@ -98,7 +98,7 @@ def normalize_price(value: Any) -> Decimal | None:
             dec = Decimal(str(value))
         except InvalidOperation:
             return None
-        return dec.quantize(Decimal("0.01")) if dec >= 0 else None
+        return dec.quantize(Decimal("0.01")) if dec > 0 else None
 
     text = str(value).strip()
     text = text.replace("٬", "").replace(",", "").replace("٫", ".")
@@ -109,7 +109,7 @@ def normalize_price(value: Any) -> Decimal | None:
         dec = Decimal(match.group(1))
     except InvalidOperation:
         return None
-    if dec < 0 or dec > Decimal("100000"):
+    if dec <= 0 or dec > Decimal("100000"):
         return None
     return dec.quantize(Decimal("0.01"))
 
