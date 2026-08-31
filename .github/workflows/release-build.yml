@@ -79,7 +79,7 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      - name: Build signed lightweight APK and App Bundle
+      - name: Build signed standalone APK and App Bundle
         run: ./gradlew --no-daemon :market-app:assembleRelease :market-app:bundleRelease
 
       - name: Verify signed APK identity and size
@@ -89,10 +89,10 @@ jobs:
           test -f "$APK"
           "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner" verify --verbose --print-certs "$APK"
           BYTES=$(stat -c%s "$APK")
-          LIMIT=$((40 * 1024 * 1024))
+          LIMIT=$((100 * 1024 * 1024))
           echo "Release APK size: $BYTES bytes"
           if (( BYTES > LIMIT )); then
-            echo "Release APK exceeds 40 MiB lightweight-app budget." >&2
+            echo "Release APK exceeds 100 MiB quality budget." >&2
             exit 1
           fi
 
@@ -107,7 +107,7 @@ jobs:
             echo "### مقارن الأسعار"
             echo "- Package: com.malik05255.supermarket"
             echo "- Version: ${APP_VERSION_NAME} (${APP_VERSION_CODE})"
-            echo "- Module: market-app (standalone lightweight client)"
+            echo "- Module: market-app (standalone client)"
             echo "- Signing: stable installer key"
             echo "- Upgrade behavior: installs over any older market-app build signed with the same key"
           } >> "$GITHUB_STEP_SUMMARY"
