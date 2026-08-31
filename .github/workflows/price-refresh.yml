@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       retailer:
-        description: "Optional retailer slug (leave empty for all)"
+        description: "Optional retailer slug (default scheduled scope: lulu + tamimi)"
         required: false
         type: string
 
@@ -24,8 +24,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 330
     env:
-      # Project URL is public configuration, not a secret. This leaves only the
-      # service-role key as the required Supabase GitHub secret for ingestion.
       SUPABASE_URL: https://lbgcjmsqqhrpceijdqng.supabase.co
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       FIREBASE_DATABASE_URL: ${{ secrets.FIREBASE_DATABASE_URL }}
@@ -98,23 +96,25 @@ jobs:
         if: steps.config.outputs.ready == 'true'
         shell: bash
         run: |
-          EXTRA=()
           if [[ -n "${{ inputs.retailer }}" ]]; then
-            EXTRA+=(--retailer "${{ inputs.retailer }}")
+            python cloud/ingest/refresh_v2.py --mode discover --max-pages 40 --retailer "${{ inputs.retailer }}"
+          else
+            for RETAILER in lulu tamimi; do
+              python cloud/ingest/refresh_v2.py --mode discover --max-pages 40 --retailer "$RETAILER"
+            done
           fi
-          # Small bootstrap on every 12-hour cycle. This prevents a fresh database
-          # from waiting for the weekly broad discovery before it can obtain prices.
-          python cloud/ingest/refresh_v2.py --mode discover --max-pages 40 "${EXTRA[@]}"
 
       - name: Refresh known retailer prices
         if: steps.config.outputs.ready == 'true'
         shell: bash
         run: |
-          EXTRA=()
           if [[ -n "${{ inputs.retailer }}" ]]; then
-            EXTRA+=(--retailer "${{ inputs.retailer }}")
+            python cloud/ingest/refresh_v2.py --mode refresh --retailer "${{ inputs.retailer }}"
+          else
+            for RETAILER in lulu tamimi; do
+              python cloud/ingest/refresh_v2.py --mode refresh --retailer "$RETAILER"
+            done
           fi
-          python cloud/ingest/refresh_v2.py --mode refresh "${EXTRA[@]}"
 
       - name: Build replica delta and sync Firebase
         if: steps.config.outputs.ready == 'true'
@@ -140,11 +140,11 @@ jobs:
         if: always()
         run: |
           echo "### Supermarket refresh" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Automated retailer scope: LuLu + Tamimi" >> "$GITHUB_STEP_SUMMARY"
           echo "- GTIN/product association tests: required before ingestion" >> "$GITHUB_STEP_SUMMARY"
           echo "- Small public discovery: every 12 hours" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Broad public discovery: weekly" >> "$GITHUB_STEP_SUMMARY"
           if [[ "${{ steps.config.outputs.ready }}" != "true" ]]; then
-            echo "- Status: add only SUPABASE_SERVICE_ROLE_KEY to enable canonical ingestion" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Status: add SUPABASE_SERVICE_ROLE_KEY to enable canonical ingestion" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- Supabase canonical discovery + refresh: attempted" >> "$GITHUB_STEP_SUMMARY"
             echo "- Priority unknown scans: imported when D1 is configured" >> "$GITHUB_STEP_SUMMARY"
