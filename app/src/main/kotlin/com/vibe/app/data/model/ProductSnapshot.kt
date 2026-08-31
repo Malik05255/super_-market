@@ -14,6 +14,42 @@ data class RetailerOffer(
 )
 
 @Serializable
+data class ProductInfo(
+    @SerialName("manufacturing_country") val manufacturingCountry: String? = null,
+    @SerialName("manufacturing_places") val manufacturingPlaces: String? = null,
+    val ingredients: String? = null,
+    val allergens: List<String> = emptyList(),
+    @SerialName("positive_notes") val positiveNotes: List<String> = emptyList(),
+    @SerialName("caution_notes") val cautionNotes: List<String> = emptyList(),
+    @SerialName("nutrition_grade") val nutritionGrade: String? = null,
+    @SerialName("nova_group") val novaGroup: Int? = null,
+    @SerialName("data_source") val dataSource: String? = null,
+    @SerialName("updated_at") val updatedAt: String? = null
+) {
+    val hasUsefulData: Boolean
+        get() = !manufacturingCountry.isNullOrBlank() ||
+            !manufacturingPlaces.isNullOrBlank() ||
+            !ingredients.isNullOrBlank() ||
+            allergens.isNotEmpty() ||
+            positiveNotes.isNotEmpty() ||
+            cautionNotes.isNotEmpty() ||
+            !nutritionGrade.isNullOrBlank() ||
+            novaGroup != null
+
+    val completenessScore: Int
+        get() = listOf(
+            !manufacturingCountry.isNullOrBlank(),
+            !manufacturingPlaces.isNullOrBlank(),
+            !ingredients.isNullOrBlank(),
+            allergens.isNotEmpty(),
+            positiveNotes.isNotEmpty(),
+            cautionNotes.isNotEmpty(),
+            !nutritionGrade.isNullOrBlank(),
+            novaGroup != null
+        ).count { it }
+}
+
+@Serializable
 data class ProductSnapshot(
     val barcode: String,
     @SerialName("name_ar") val nameAr: String? = null,
@@ -28,6 +64,7 @@ data class ProductSnapshot(
     @SerialName("source_count") val sourceCount: Int = 1,
     val confidence: Double? = null,
     val offers: List<RetailerOffer> = emptyList(),
+    @SerialName("product_info") val productInfo: ProductInfo? = null,
     @SerialName("cloud_source") val cloudSource: String? = null
 ) {
     val displayName: String
