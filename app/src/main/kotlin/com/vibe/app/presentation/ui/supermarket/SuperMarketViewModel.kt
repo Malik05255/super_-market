@@ -120,63 +120,77 @@ class SuperMarketViewModel @Inject constructor(
     }
 
     private fun mergeResults(barcode: String, results: List<ProductSnapshot>): ProductSnapshot {
-        val priced = results.filter { it.currentPrice != null }
-        val freshest = priced.maxByOrNull { it.priceUpdatedAt.toEpochScore() } ?: results.first()
+        // Every cloud is queried by the scanned barcode. Its headline fields therefore represent
+        // the exact-barcode fast path; canonical/alternate GTINs live only inside offers.
+        val directPriced = results
+            .filter { it.currentPrice != null }
+            .maxByOrNull { it.priceUpdatedAt.toEpochScore() }
+        val base = directPriced ?: results.first()
+
         val metadata = results.firstOrNull {
             it.cloudSource != SuperMarketRepository.LOCAL_CACHE_SOURCE &&
                 (!it.nameAr.isNullOrBlank() || !it.nameEn.isNullOrBlank() || !it.imageUrl.isNullOrBlank())
         } ?: results.firstOrNull {
             !it.nameAr.isNullOrBlank() || !it.nameEn.isNullOrBlank() || !it.imageUrl.isNullOrBlank()
-        } ?: freshest
+        } ?: base
 
         val mergedOffers = results
             .flatMap { snapshot ->
-                if (snapshot.offers.isNotEmpty()) {
-                    snapshot.offers
-                } else {
-                    listOfNotNull(snapshot.toOfferOrNull())
-                }
+                if (snapshot.offers.isNotEmpty()) snapshot.offers
+                else listOfNotNull(snapshot.toOfferOrNull(barcode))
             }
-            .groupBy { it.retailer.trim().lowercase() }
+            .groupBy { offer ->
+                listOf(
+                    offer.retailer.trim().lowercase(),
+                    offer.branchKey.orEmpty().trim().lowercase(),
+                    offer.barcode.orEmpty()
+                ).joinToString("|")
+            }
             .mapNotNull { (_, offers) -> offers.maxByOrNull { it.updatedAt.toEpochScore() } }
             .sortedBy { it.price }
 
-        val currentOffer = mergedOffers.maxByOrNull { it.updatedAt.toEpochScore() }
         val richestProductInfo = results
             .mapNotNull { it.productInfo }
             .filter { it.hasUsefulData }
             .maxByOrNull { it.completenessScore }
 
-        return freshest.copy(
+        val canonicalIdentity = results.firstNotNullOfOrNull { it.canonicalProductId }
+        val aliases = results.flatMap { it.matchedBarcodes }.distinct()
+
+        return base.copy(
             barcode = barcode,
-            nameAr = metadata.nameAr ?: freshest.nameAr,
-            nameEn = metadata.nameEn ?: freshest.nameEn,
-            imageUrl = metadata.imageUrl ?: freshest.imageUrl,
-            currentPrice = currentOffer?.price ?: freshest.currentPrice,
-            currency = currentOffer?.currency ?: freshest.currency,
-            retailer = currentOffer?.retailer ?: freshest.retailer,
-            priceUpdatedAt = currentOffer?.updatedAt ?: freshest.priceUpdatedAt,
-            min30d = results.mapNotNull { it.min30d }.minOrNull() ?: freshest.min30d,
-            max30d = results.mapNotNull { it.max30d }.maxOrNull() ?: freshest.max30d,
+            canonicalProductId = canonicalIdentity ?: base.canonicalProductId,
+            matchedBarcodes = if (aliases.isNotEmpty()) aliases else base.matchedBarcodes,
+            nameAr = metadata.nameAr ?: base.nameAr,
+            nameEn = metadata.nameEn ?: base.nameEn,
+            imageUrl = metadata.imageUrl ?: base.imageUrl,
+            // Do not replace exact-barcode headline price with an alternate-barcode offer.
+            currentPrice = base.currentPrice,
+            currency = base.currency,
+            retailer = base.retailer,
+            priceUpdatedAt = base.priceUpdatedAt,
+            min30d = results.mapNotNull { it.min30d }.minOrNull() ?: base.min30d,
+            max30d = results.mapNotNull { it.max30d }.maxOrNull() ?: base.max30d,
             sourceCount = maxOf(
-                mergedOffers.size,
+                mergedOffers.map { it.retailer.trim().lowercase() }.distinct().size,
                 results.maxOfOrNull { it.sourceCount } ?: 0
             ),
-            confidence = results.mapNotNull { it.confidence }.maxOrNull() ?: freshest.confidence,
+            confidence = results.mapNotNull { it.confidence }.maxOrNull() ?: base.confidence,
             offers = mergedOffers,
-            productInfo = richestProductInfo ?: freshest.productInfo
+            productInfo = richestProductInfo ?: base.productInfo
         )
     }
 }
 
-private fun ProductSnapshot.toOfferOrNull(): RetailerOffer? {
+private fun ProductSnapshot.toOfferOrNull(scannedBarcode: String): RetailerOffer? {
     val store = retailer?.takeIf { it.isNotBlank() } ?: return null
     val price = currentPrice ?: return null
     return RetailerOffer(
         retailer = store,
         price = price,
         currency = currency,
-        updatedAt = priceUpdatedAt
+        updatedAt = priceUpdatedAt,
+        barcode = scannedBarcode
     )
 }
 
