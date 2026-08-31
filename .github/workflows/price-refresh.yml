@@ -61,6 +61,36 @@ jobs:
             echo "Supabase secrets are not configured; refresh is skipped safely."
           fi
 
+      - name: Check Cloudflare D1 configuration
+        id: d1
+        shell: bash
+        run: |
+          if [[ -n "$CLOUDFLARE_API_TOKEN" && -n "$CLOUDFLARE_ACCOUNT_ID" && -n "$CLOUDFLARE_D1_DATABASE_NAME" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "Cloudflare D1 secrets are not configured; priority queue and D1 sync are skipped safely."
+          fi
+
+      - name: Ensure D1 schema and export priority scans
+        if: steps.d1.outputs.ready == 'true'
+        shell: bash
+        run: |
+          mkdir -p cloud/.generated
+          npx --yes wrangler@4 d1 execute "$CLOUDFLARE_D1_DATABASE_NAME" \
+            --remote --yes --file=cloud/d1.sql
+          npx --yes wrangler@4 d1 execute "$CLOUDFLARE_D1_DATABASE_NAME" \
+            --remote --json \
+            --command="SELECT barcode, scan_count, name_ar, name_en, image_url, last_seen_at, last_attempt_at FROM missing_barcodes WHERE status='pending' AND (last_attempt_at IS NULL OR last_attempt_at < datetime('now','-24 hours')) ORDER BY scan_count DESC, last_seen_at DESC LIMIT 250" \
+            > cloud/.generated/d1-priority.json
+
+      - name: Persist priority barcode metadata
+        if: steps.config.outputs.ready == 'true' && steps.d1.outputs.ready == 'true'
+        run: |
+          python cloud/ingest/priority_scans.py \
+            --input cloud/.generated/d1-priority.json \
+            --mark-sql cloud/.generated/d1-priority-mark.sql
+
       - name: Refresh retailer prices
         if: steps.config.outputs.ready == 'true'
         shell: bash
@@ -76,16 +106,21 @@ jobs:
         run: python cloud/ingest/sync_replicas.py
 
       - name: Apply changed snapshots to Cloudflare D1
-        if: steps.config.outputs.ready == 'true'
+        if: steps.config.outputs.ready == 'true' && steps.d1.outputs.ready == 'true'
         shell: bash
         run: |
-          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" || -z "$CLOUDFLARE_D1_DATABASE_NAME" ]]; then
-            echo "Cloudflare D1 secrets are not configured; D1 sync is skipped safely."
-            exit 0
-          fi
           npx --yes wrangler@4 d1 execute "$CLOUDFLARE_D1_DATABASE_NAME" \
-            --remote \
-            --file=cloud/.generated/d1-sync.sql
+            --remote --yes --file=cloud/.generated/d1-sync.sql
+
+          if [[ -f cloud/.generated/d1-priority-mark.sql ]]; then
+            npx --yes wrangler@4 d1 execute "$CLOUDFLARE_D1_DATABASE_NAME" \
+              --remote --yes --file=cloud/.generated/d1-priority-mark.sql
+          fi
+
+          # A queued barcode is resolved only after we actually have a supermarket price/offer.
+          npx --yes wrangler@4 d1 execute "$CLOUDFLARE_D1_DATABASE_NAME" \
+            --remote --yes \
+            --command="UPDATE missing_barcodes SET status='resolved', resolved_at=datetime('now') WHERE status='pending' AND barcode IN (SELECT barcode FROM product_snapshots WHERE json_extract(payload,'$.current_price') IS NOT NULL OR json_array_length(COALESCE(json_extract(payload,'$.offers'), json('[]'))) > 0)"
 
       - name: Refresh summary
         if: always()
@@ -93,9 +128,10 @@ jobs:
           echo "### Supermarket refresh" >> "$GITHUB_STEP_SUMMARY"
           echo "- Product identity tests: required before refresh" >> "$GITHUB_STEP_SUMMARY"
           if [[ "${{ steps.config.outputs.ready }}" != "true" ]]; then
-            echo "- Status: not configured yet" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Status: Supabase not configured yet" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- Canonical refresh: attempted" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Priority unknown scans: imported when D1 is configured" >> "$GITHUB_STEP_SUMMARY"
             echo "- Firebase: synchronized when credentials are present" >> "$GITHUB_STEP_SUMMARY"
             echo "- D1: synchronized when credentials are present" >> "$GITHUB_STEP_SUMMARY"
           fi
