@@ -39,13 +39,21 @@ class SupabaseSource(private val url: String, private val key: String) : CloudSo
     override val id = "supabase"
     override val configured = url.isNotBlank() && key.isNotBlank()
 
+    private fun io.ktor.client.request.HttpRequestBuilder.applySupabaseHeaders() {
+        header("apikey", key)
+        // Legacy anon keys are JWTs and can be used as Bearer tokens. Modern
+        // sb_publishable_* keys are API keys, not JWTs, so sending them as Bearer is invalid.
+        if (key.startsWith("eyJ")) {
+            header(HttpHeaders.Authorization, "Bearer $key")
+        }
+    }
+
     override suspend fun health(): Boolean = runCatching {
         if (!configured) return false
         MarketHttp.get("${url.trimEnd('/')}/rest/v1/product_snapshots") {
             parameter("select", "barcode")
             parameter("limit", "1")
-            header("apikey", key)
-            header(HttpHeaders.Authorization, "Bearer $key")
+            applySupabaseHeaders()
         }.status.value in 200..299
     }.getOrDefault(false)
 
@@ -55,8 +63,7 @@ class SupabaseSource(private val url: String, private val key: String) : CloudSo
             parameter("select", "payload")
             parameter("barcode", "eq.$barcode")
             parameter("limit", "1")
-            header("apikey", key)
-            header(HttpHeaders.Authorization, "Bearer $key")
+            applySupabaseHeaders()
         }
         if (r.status.value !in 200..299) return null
         return r.body<List<SnapshotRow>>().firstOrNull()?.payload?.copy(cloudSource = id)
