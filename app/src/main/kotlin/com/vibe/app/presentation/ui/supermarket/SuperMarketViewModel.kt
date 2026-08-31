@@ -142,6 +142,10 @@ class SuperMarketViewModel @Inject constructor(
             .sortedBy { it.price }
 
         val currentOffer = mergedOffers.maxByOrNull { it.updatedAt.toEpochScore() }
+        val richestProductInfo = results
+            .mapNotNull { it.productInfo }
+            .filter { it.hasUsefulData }
+            .maxByOrNull { it.completenessScore }
 
         return freshest.copy(
             barcode = barcode,
@@ -159,7 +163,8 @@ class SuperMarketViewModel @Inject constructor(
                 results.maxOfOrNull { it.sourceCount } ?: 0
             ),
             confidence = results.mapNotNull { it.confidence }.maxOrNull() ?: freshest.confidence,
-            offers = mergedOffers
+            offers = mergedOffers,
+            productInfo = richestProductInfo ?: freshest.productInfo
         )
     }
 }
