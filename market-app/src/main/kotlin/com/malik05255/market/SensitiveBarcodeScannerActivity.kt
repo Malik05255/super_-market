@@ -33,6 +33,9 @@ import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.ZoomSuggestionOptions
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognizer
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -40,13 +43,17 @@ import java.util.concurrent.atomic.AtomicBoolean
 class SensitiveBarcodeScannerActivity : ComponentActivity() {
     companion object {
         const val EXTRA_BARCODE = "barcode"
+        private const val EVIDENCE_PREFS = "scan_visual_evidence"
+        private const val EVIDENCE_TTL_MS = 2 * 60 * 1000L
     }
 
     private val cameraExecutor = Executors.newSingleThreadExecutor()
     private val processing = AtomicBoolean(false)
+    private val finishing = AtomicBoolean(false)
     private val capturePolicy = BarcodeCapturePolicy()
     private var camera: Camera? = null
     private var scanner: BarcodeScanner? = null
+    private var textRecognizer: TextRecognizer? = null
     private lateinit var previewView: PreviewView
     private lateinit var statusText: TextView
     private lateinit var torchButton: Button
@@ -63,6 +70,7 @@ class SensitiveBarcodeScannerActivity : ComponentActivity() {
         window.statusBarColor = Color.BLACK
         window.navigationBarColor = Color.BLACK
         setContentView(buildUi())
+        textRecognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startCamera()
@@ -105,13 +113,13 @@ class SensitiveBarcodeScannerActivity : ComponentActivity() {
             background = GradientDrawable().apply { setColor(0x99000000.toInt()) }
         }
         val title = TextView(this).apply {
-            text = "قارئ باركود عالي الدقة"
+            text = "قارئ باركود ذكي"
             textSize = 20f
             setTextColor(Color.WHITE)
             gravity = Gravity.CENTER
         }
         statusText = TextView(this).apply {
-            text = "قرّب الباركود حتى يملأ الإطار • يدعم التكبير والتركيز باللمس"
+            text = "امسح الباركود وسيقرأ التطبيق معلومات العبوة تلقائيًا كخطة احتياطية"
             textSize = 14f
             setTextColor(0xFFD8FFF1.toInt())
             gravity = Gravity.CENTER
@@ -153,7 +161,8 @@ class SensitiveBarcodeScannerActivity : ComponentActivity() {
     private fun startCamera() {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
-            val provider = runCatching { future.get() }.getOrNull() ?: return@addListener finishWithError("تعذر تشغيل الكاميرا")
+            val provider = runCatching { future.get() }.getOrNull()
+                ?: return@addListener finishWithError("تعذر تشغيل الكاميرا")
             val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
             val analysis = ImageAnalysis.Builder()
                 .setTargetResolution(Size(1920, 1080))
@@ -174,7 +183,7 @@ class SensitiveBarcodeScannerActivity : ComponentActivity() {
             scanner = createScanner(boundCamera)
 
             analysis.setAnalyzer(cameraExecutor) { proxy ->
-                if (!processing.compareAndSet(false, true)) {
+                if (finishing.get() || !processing.compareAndSet(false, true)) {
                     proxy.close()
                     return@setAnalyzer
                 }
@@ -191,9 +200,38 @@ class SensitiveBarcodeScannerActivity : ComponentActivity() {
                     proxy.close()
                     return@setAnalyzer
                 }
+
                 activeScanner.process(image)
-                    .addOnSuccessListener { barcodes -> handleDetections(barcodes) }
-                    .addOnCompleteListener {
+                    .addOnSuccessListener { barcodes ->
+                        val confirmed = confirmedBarcode(barcodes)
+                        if (confirmed == null || !finishing.compareAndSet(false, true)) {
+                            processing.set(false)
+                            proxy.close()
+                            return@addOnSuccessListener
+                        }
+
+                        runOnUiThread { statusText.text = "تمت قراءة $confirmed • جارٍ التعرف على العبوة…" }
+                        val recognizer = textRecognizer
+                        if (recognizer == null) {
+                            finishSuccessfulScan(confirmed, "")
+                            processing.set(false)
+                            proxy.close()
+                            return@addOnSuccessListener
+                        }
+
+                        recognizer.process(image)
+                            .addOnSuccessListener { result ->
+                                finishSuccessfulScan(confirmed, cleanEvidence(result.text))
+                            }
+                            .addOnFailureListener {
+                                finishSuccessfulScan(confirmed, "")
+                            }
+                            .addOnCompleteListener {
+                                processing.set(false)
+                                proxy.close()
+                            }
+                    }
+                    .addOnFailureListener {
                         processing.set(false)
                         proxy.close()
                     }
@@ -226,18 +264,32 @@ class SensitiveBarcodeScannerActivity : ComponentActivity() {
         return BarcodeScanning.getClient(options)
     }
 
-    private fun handleDetections(barcodes: List<Barcode>) {
+    private fun confirmedBarcode(barcodes: List<Barcode>): String? {
         val candidates = barcodes.mapNotNull { barcode ->
             val value = normalizeRetailBarcode(barcode.rawValue) ?: return@mapNotNull null
             val area = barcode.boundingBox?.let { it.width().toLong() * it.height().toLong() } ?: 0L
             value to area
         }.sortedByDescending { it.second }
 
-        val best = candidates.firstOrNull()?.first ?: return
-        val confirmed = capturePolicy.observe(best, System.currentTimeMillis()) ?: return
+        val best = candidates.firstOrNull()?.first ?: return null
+        return capturePolicy.observe(best, System.currentTimeMillis())
+    }
+
+    private fun cleanEvidence(raw: String): String = raw
+        .replace(Regex("[\\t\\r]+"), " ")
+        .replace(Regex("\\n{3,}"), "\n\n")
+        .trim()
+        .take(4_000)
+
+    private fun finishSuccessfulScan(barcode: String, evidence: String) {
+        val now = System.currentTimeMillis()
+        getSharedPreferences(EVIDENCE_PREFS, MODE_PRIVATE).edit()
+            .putString("${barcode}:text", evidence)
+            .putLong("${barcode}:at", now)
+            .apply()
+
         runOnUiThread {
-            statusText.text = "تمت قراءة $confirmed"
-            val result = Intent().putExtra(EXTRA_BARCODE, confirmed)
+            val result = Intent().putExtra(EXTRA_BARCODE, barcode)
             setResult(Activity.RESULT_OK, result)
             finish()
         }
@@ -261,7 +313,7 @@ class SensitiveBarcodeScannerActivity : ComponentActivity() {
                     .setAutoCancelDuration(2, TimeUnit.SECONDS)
                     .build()
                 boundCamera.cameraControl.startFocusAndMetering(action)
-                statusText.text = "تم ضبط التركيز • ثبّت الباركود داخل الإطار"
+                statusText.text = "تم ضبط التركيز • ثبّت العبوة والباركود داخل مجال الكاميرا"
             }
             true
         }
@@ -283,6 +335,7 @@ class SensitiveBarcodeScannerActivity : ComponentActivity() {
 
     override fun onDestroy() {
         scanner?.close()
+        textRecognizer?.close()
         cameraExecutor.shutdown()
         super.onDestroy()
     }
