@@ -6,13 +6,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
-import androidx.navigation.compose.rememberNavController
 import dagger.hilt.android.AndroidEntryPoint
 import com.vibe.app.presentation.common.LocalDynamicTheme
 import com.vibe.app.presentation.common.LocalThemeMode
-import com.vibe.app.presentation.common.SetupNavGraph
 import com.vibe.app.presentation.common.ThemeSettingProvider
 import com.vibe.app.presentation.theme.VibeAppTheme
+import com.vibe.app.presentation.ui.supermarket.SuperMarketScreen
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
@@ -28,18 +27,15 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
-        // Prevent keyboard from pushing the entire view up - composable handles insets via imePadding()
         window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
 
         setContent {
-            val navController = rememberNavController()
-
             ThemeSettingProvider {
                 VibeAppTheme(
                     dynamicTheme = LocalDynamicTheme.current,
                     themeMode = LocalThemeMode.current
                 ) {
-                    SetupNavGraph(navController)
+                    SuperMarketScreen()
                 }
             }
         }

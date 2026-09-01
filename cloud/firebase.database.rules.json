@@ -1,0 +1,21 @@
+{
+  "rules": {
+    "product_snapshots": {
+      ".read": true,
+      ".write": false,
+      "$barcode": {
+        ".validate": "$barcode.matches(/^[0-9]{8,14}$/)"
+      }
+    },
+    "system_state": {
+      ".read": false,
+      ".write": false,
+      "last_price_refresh": {
+        ".read": true,
+        ".write": false
+      }
+    },
+    ".read": false,
+    ".write": false
+  }
+}

@@ -1,0 +1,190 @@
+name: Saudi Master Shards
+
+on:
+  push:
+    branches:
+      - feature/saudi-supermarket-barcode
+    paths:
+      - "tools/saudi_master/build_shards.py"
+      - ".github/workflows/saudi-master-build.yml"
+  workflow_dispatch:
+    inputs:
+      food_pages:
+        description: "SFDA food pages for this run"
+        required: false
+        default: "20"
+        type: string
+      cosmetics_pages:
+        description: "SFDA cosmetics pages for this run"
+        required: false
+        default: "2"
+        type: string
+  schedule:
+    # Becomes active when this workflow is on the repository default branch.
+    - cron: "17 */6 * * *"
+
+concurrency:
+  group: saudi-master-shards
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  MASTER_TAG: saudi-master-latest
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  build:
+    name: Crawl, merge and publish shards
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install crawler dependencies
+        run: python -m pip install --disable-pip-version-check requests beautifulsoup4
+
+      - name: Select safe crawl budget
+        id: budget
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "food=3" >> "$GITHUB_OUTPUT"
+            echo "cosmetics=1" >> "$GITHUB_OUTPUT"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "food=${{ inputs.food_pages || '20' }}" >> "$GITHUB_OUTPUT"
+            echo "cosmetics=${{ inputs.cosmetics_pages || '2' }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "food=80" >> "$GITHUB_OUTPUT"
+            echo "cosmetics=4" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Ensure stable master release
+        shell: bash
+        run: |
+          if ! gh release view "$MASTER_TAG" >/dev/null 2>&1; then
+            gh release create "$MASTER_TAG" \
+              --target "$GITHUB_SHA" \
+              --title "Saudi Master Barcode Database" \
+              --notes "Incremental exact-GTIN identity shards built from public/official Saudi sources. Assets are machine-generated and updated in place."
+          fi
+
+      - name: Restore release manifest
+        shell: bash
+        run: |
+          mkdir -p state
+          if ! gh release download "$MASTER_TAG" --pattern manifest.json --dir state >/dev/null 2>&1; then
+            cat > state/manifest.json <<'JSON'
+          {
+            "schema_version": 1,
+            "cursors": {"food": 0, "cosmetics": 0},
+            "records_seen": {"food": 0, "cosmetics": 0},
+            "updated_at": null
+          }
+          JSON
+          fi
+          cat state/manifest.json
+
+      - name: Crawl SFDA food
+        run: |
+          rm -rf build/food
+          python tools/saudi_master/build_shards.py crawl \
+            --source food \
+            --pages "${{ steps.budget.outputs.food }}" \
+            --manifest state/manifest.json \
+            --out build/food
+
+      - name: Merge and publish food shards
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p existing merged
+          shopt -s nullglob
+          for delta in build/food/delta/gtin-*.jsonl; do
+            stem="$(basename "$delta" .jsonl)"
+            asset="$stem.jsonl.gz"
+            rm -f "existing/$asset" "merged/$asset"
+            gh release download "$MASTER_TAG" --pattern "$asset" --dir existing >/dev/null 2>&1 || true
+            EXTRA=()
+            if [[ -f "existing/$asset" ]]; then
+              EXTRA+=(--existing "existing/$asset")
+            fi
+            python tools/saudi_master/build_shards.py merge \
+              "${EXTRA[@]}" \
+              --delta "$delta" \
+              --output "merged/$asset"
+            gh release upload "$MASTER_TAG" "merged/$asset" --clobber
+          done
+          python tools/saudi_master/build_shards.py update-manifest \
+            --manifest state/manifest.json \
+            --run build/food/run.json \
+            --output state/manifest-food.json
+          mv state/manifest-food.json state/manifest.json
+
+      - name: Crawl SFDA cosmetics
+        run: |
+          rm -rf build/cosmetics
+          python tools/saudi_master/build_shards.py crawl \
+            --source cosmetics \
+            --pages "${{ steps.budget.outputs.cosmetics }}" \
+            --workers 4 \
+            --delay 0.35 \
+            --manifest state/manifest.json \
+            --out build/cosmetics
+
+      - name: Merge and publish cosmetics shards
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p existing merged
+          shopt -s nullglob
+          for delta in build/cosmetics/delta/gtin-*.jsonl; do
+            stem="$(basename "$delta" .jsonl)"
+            asset="$stem.jsonl.gz"
+            rm -f "existing/$asset" "merged/$asset"
+            gh release download "$MASTER_TAG" --pattern "$asset" --dir existing >/dev/null 2>&1 || true
+            EXTRA=()
+            if [[ -f "existing/$asset" ]]; then
+              EXTRA+=(--existing "existing/$asset")
+            fi
+            python tools/saudi_master/build_shards.py merge \
+              "${EXTRA[@]}" \
+              --delta "$delta" \
+              --output "merged/$asset"
+            gh release upload "$MASTER_TAG" "merged/$asset" --clobber
+          done
+          python tools/saudi_master/build_shards.py update-manifest \
+            --manifest state/manifest.json \
+            --run build/cosmetics/run.json \
+            --output state/manifest-final.json
+          mv state/manifest-final.json state/manifest.json
+
+      - name: Publish manifest last
+        run: gh release upload "$MASTER_TAG" state/manifest.json#manifest.json --clobber
+
+      - name: Build summary
+        if: always()
+        shell: bash
+        run: |
+          echo "### Saudi Master Shards" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Release tag: \`$MASTER_TAG\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Food budget: ${{ steps.budget.outputs.food }} pages" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Cosmetics budget: ${{ steps.budget.outputs.cosmetics }} pages" >> "$GITHUB_STEP_SUMMARY"
+          if [[ -f build/food/run.json ]]; then
+            echo '#### Food' >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat build/food/run.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [[ -f build/cosmetics/run.json ]]; then
+            echo '#### Cosmetics' >> "$GITHUB_STEP_SUMMARY"
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            cat build/cosmetics/run.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi

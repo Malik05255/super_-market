@@ -1,0 +1,38 @@
+name: Saudi Master SFDA Probe
+
+on:
+  push:
+    branches:
+      - feature/saudi-supermarket-barcode
+    paths:
+      - "tools/saudi_master/probe_sfda.py"
+      - ".github/workflows/saudi-master-probe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Probe official SFDA list services
+        run: python tools/saudi_master/probe_sfda.py
+      - name: Summary
+        if: always()
+        run: |
+          echo "### SFDA bulk probe" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat sfda-probe.json >> "$GITHUB_STEP_SUMMARY" || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sfda-bulk-probe
+          path: sfda-probe.json
+          retention-days: 1
