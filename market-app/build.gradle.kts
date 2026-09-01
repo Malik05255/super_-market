@@ -18,7 +18,7 @@ android {
     val resolvedVersionCode = explicitVersionCode ?: ciRunNumber?.let { 20_000 + it } ?: 20_000
     val resolvedVersionName = providers.gradleProperty("APP_VERSION_NAME")
         .orElse(providers.environmentVariable("APP_VERSION_NAME"))
-        .orElse("2.1.0")
+        .orElse("2.2.0")
         .get()
 
     val signingStorePath = providers.environmentVariable("ANDROID_KEYSTORE_PATH").orNull
@@ -120,6 +120,7 @@ dependencies {
     implementation("androidx.camera:camera-lifecycle:1.6.2")
     implementation("androidx.camera:camera-view:1.6.2")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.ktor.core)
