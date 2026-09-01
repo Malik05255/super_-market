@@ -11,7 +11,8 @@ data class RetailerOffer(
     @SerialName("updated_at") val updatedAt: String? = null,
     @SerialName("branch_key") val branchKey: String? = null,
     @SerialName("source_url") val sourceUrl: String? = null,
-    val barcode: String? = null
+    val barcode: String? = null,
+    @SerialName("match_method") val matchMethod: String? = null
 )
 
 @Serializable
@@ -51,10 +52,19 @@ data class ProductSnapshot(
     val confidence: Double? = null,
     val offers: List<RetailerOffer> = emptyList(),
     @SerialName("product_info") val productInfo: ProductInfo? = null,
+    @SerialName("exact_barcode_match") val exactBarcodeMatch: Boolean = false,
+    @SerialName("headline_match_method") val headlineMatchMethod: String? = null,
     @SerialName("cloud_source") val cloudSource: String? = null
 ) {
     val displayName: String
         get() = nameAr?.takeIf { it.isNotBlank() }
             ?: nameEn?.takeIf { it.isNotBlank() }
             ?: "منتج غير معروف"
+
+    val currentPriceLabel: String
+        get() = when {
+            exactBarcodeMatch -> "السعر الحالي لنفس الباركود"
+            headlineMatchMethod == "canonical_identity" -> "السعر الحالي لنفس المنتج"
+            else -> "السعر الحالي"
+        }
 }
