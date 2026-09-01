@@ -118,16 +118,12 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.coil.compose)
 
-    // High-sensitivity local scanner: direct CameraX feed + bundled ML Kit models.
     implementation("androidx.camera:camera-core:1.6.2")
     implementation("androidx.camera:camera-camera2:1.6.2")
     implementation("androidx.camera:camera-lifecycle:1.6.2")
     implementation("androidx.camera:camera-view:1.6.2")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
-    // Bundled Latin OCR is immediately available offline and adds only a few MiB.
-    // It captures common bilingual packaging brand/size text without uploading images.
     implementation("com.google.mlkit:text-recognition:16.0.1")
-    // Arabic-script OCR fallback for Saudi/local packaging. Standard flavor keeps APK smaller.
     implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
 
     implementation(libs.kotlinx.serialization.json)
@@ -139,30 +135,42 @@ dependencies {
     testImplementation(libs.junit)
 }
 
-// Bundle the official Arabic tessdata_fast model into the APK without committing binary
-// model bytes to this public repository. The source commit is immutable/pinned.
+// Accuracy-first Arabic model. It is downloaded only at build time from an immutable
+// Tesseract commit, verified by SHA-256, and then packaged into the APK. No runtime
+// download and no product image leaves the device.
 val prepareArabicTessdata by tasks.registering {
     val output = layout.projectDirectory.file("src/main/assets/tessdata/ara.traineddata").asFile
+    val expectedSha256 = "ab9d157d8e38ca00e7e39c7d5363a5239e053f5b0dbdb3167dde9d8124335896"
     outputs.file(output)
     doLast {
-        if (output.exists() && output.length() > 1_000_000L) return@doLast
+        fun sha256(file: java.io.File): String = MessageDigest.getInstance("SHA-256")
+            .digest(file.readBytes())
+            .joinToString("") { byte -> "%02x".format(byte) }
+
+        if (output.exists() && output.length() > 5_000_000L && sha256(output) == expectedSha256) {
+            println("Arabic tessdata_best already verified: ${output.length()} bytes")
+            return@doLast
+        }
+
         output.parentFile.mkdirs()
+        if (output.exists()) output.delete()
         val source = URI(
-            "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/923915d4ced2a7235221788285785a29c4a42d4a/ara.traineddata"
+            "https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/e12c65a915945e4c28e237a9b52bc4a8f39a0cec/ara.traineddata"
         ).toURL()
         val connection = source.openConnection().apply {
             connectTimeout = 15_000
-            readTimeout = 30_000
-            setRequestProperty("User-Agent", "MoqarinAlasaarBuild/2.0")
+            readTimeout = 45_000
+            setRequestProperty("User-Agent", "MoqarinAlasaarBuild/2.1")
         }
         connection.getInputStream().use { input ->
             output.outputStream().use { destination -> input.copyTo(destination) }
         }
-        check(output.length() > 1_000_000L) { "Arabic tessdata download is unexpectedly small" }
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest(output.readBytes())
-            .joinToString("") { byte -> "%02x".format(byte) }
-        println("Arabic tessdata: ${output.length()} bytes sha256=$digest")
+        check(output.length() > 5_000_000L) { "Arabic tessdata_best download is unexpectedly small" }
+        val actual = sha256(output)
+        check(actual == expectedSha256) {
+            "Arabic tessdata_best checksum mismatch: expected=$expectedSha256 actual=$actual"
+        }
+        println("Arabic tessdata_best verified: ${output.length()} bytes sha256=$actual")
     }
 }
 
