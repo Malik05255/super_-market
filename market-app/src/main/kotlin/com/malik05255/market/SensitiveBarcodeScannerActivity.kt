@@ -37,7 +37,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
-@OptIn(ExperimentalGetImage::class)
+@ExperimentalGetImage
 class SensitiveBarcodeScannerActivity : ComponentActivity() {
     companion object {
         const val EXTRA_BARCODE = "barcode"
