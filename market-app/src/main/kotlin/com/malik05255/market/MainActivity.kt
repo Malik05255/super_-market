@@ -26,6 +26,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.TrendingDown
+import androidx.compose.material.icons.automirrored.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.Image
@@ -36,8 +38,6 @@ import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.RestaurantMenu
 import androidx.compose.material.icons.outlined.ShoppingBag
 import androidx.compose.material.icons.outlined.Storefront
-import androidx.compose.material.icons.outlined.TrendingDown
-import androidx.compose.material.icons.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -58,6 +58,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -139,13 +140,40 @@ private fun MarketScreen(viewModel: MarketViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val healthy by viewModel.healthyClouds.collectAsStateWithLifecycle()
     var info by remember { mutableStateOf<ProductSnapshot?>(null) }
+    var autoVisualAttempted by remember { mutableStateOf(emptySet<String>()) }
     val context = LocalContext.current
+
     val scannerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             val barcode = result.data?.getStringExtra(SensitiveBarcodeScannerActivity.EXTRA_BARCODE)
             if (!barcode.isNullOrBlank()) viewModel.lookup(barcode)
         } else {
             result.data?.getStringExtra("error")?.takeIf { it.isNotBlank() }?.let(viewModel::scannerFailed)
+        }
+    }
+
+    val visualLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val barcode = result.data?.getStringExtra(ProductTextScannerActivity.EXTRA_INPUT_BARCODE).orEmpty()
+            val text = result.data?.getStringExtra(ProductTextScannerActivity.EXTRA_RECOGNIZED_TEXT).orEmpty()
+            if (barcode.isNotBlank() && text.isNotBlank()) viewModel.lookupByText(barcode, text)
+        } else {
+            result.data?.getStringExtra("error")?.takeIf { it.isNotBlank() }?.let(viewModel::scannerFailed)
+        }
+    }
+
+    fun launchVisual(barcode: String) {
+        visualLauncher.launch(
+            Intent(context, ProductTextScannerActivity::class.java)
+                .putExtra(ProductTextScannerActivity.EXTRA_INPUT_BARCODE, barcode)
+        )
+    }
+
+    LaunchedEffect(state) {
+        val missing = state as? MarketUiState.NotFound ?: return@LaunchedEffect
+        if (missing.barcode !in autoVisualAttempted) {
+            autoVisualAttempted = autoVisualAttempted + missing.barcode
+            launchVisual(missing.barcode)
         }
     }
 
@@ -174,11 +202,15 @@ private fun MarketScreen(viewModel: MarketViewModel) {
                     Spacer(Modifier.size(10.dp))
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("اقرأ الباركود", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("ماسح عالي الحساسية والدقة", style = MaterialTheme.typography.labelSmall)
+                        Text("باركود أولًا • ثم تعرّف بصري تلقائي عند الحاجة", style = MaterialTheme.typography.labelSmall)
                     }
                 }
                 Spacer(Modifier.height(16.dp))
-                Result(state, onInfo = { info = it })
+                Result(
+                    state = state,
+                    onInfo = { info = it },
+                    onVisualLookup = ::launchVisual
+                )
                 Spacer(Modifier.height(28.dp))
             }
         }
@@ -198,7 +230,7 @@ private fun Header(healthy: Int, configured: Int) {
         Spacer(Modifier.size(12.dp))
         Column(Modifier.weight(1f)) {
             Text("مقارن الأسعار", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-            Text("امسح • قارن • وفر", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("امسح • تعرّف • قارن • وفر", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         if (configured > 0) {
             Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.primaryContainer) {
@@ -216,7 +248,7 @@ private fun Header(healthy: Int, configured: Int) {
             Icon(Icons.Outlined.CheckCircle, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.size(7.dp))
             Text(
-                "نفس الباركود أولًا • ثم نفس المنتج • تحديث كل 12 ساعة",
+                "نفس الباركود أولًا • هوية موثوقة • تطابق بصري عند غياب الباركود",
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -251,7 +283,7 @@ private fun ProductImage(state: MarketUiState) {
                     }
                     Spacer(Modifier.height(10.dp))
                     Text("صورة المنتج", fontWeight = FontWeight.Bold)
-                    Text("تظهر تلقائيًا بعد المسح", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("تظهر تلقائيًا بعد التعرف", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -259,14 +291,55 @@ private fun ProductImage(state: MarketUiState) {
 }
 
 @Composable
-private fun Result(state: MarketUiState, onInfo: (ProductSnapshot) -> Unit) {
+private fun Result(
+    state: MarketUiState,
+    onInfo: (ProductSnapshot) -> Unit,
+    onVisualLookup: (String) -> Unit
+) {
     Box(Modifier.fillMaxWidth().animateContentSize()) {
         when (state) {
-            MarketUiState.Idle -> MessageCard(Icons.Outlined.QrCodeScanner, "جاهز للمسح", "وجّه الكاميرا للباركود وسنعرض المقارنة فورًا.")
+            MarketUiState.Idle -> MessageCard(Icons.Outlined.QrCodeScanner, "جاهز للمسح", "وجّه الكاميرا للباركود. إذا لم يوجد، سننتقل تلقائيًا للتعرف من واجهة العبوة.")
             is MarketUiState.Loading -> LoadingCard(state.barcode)
             is MarketUiState.Found -> ProductResult(state, onInfo)
-            is MarketUiState.NotFound -> MessageCard(Icons.Outlined.Inventory2, "المنتج غير موجود بعد", "الباركود ${state.barcode} لم يرجع نتيجة موثوقة. لن نعرض سعرًا مخمّنًا.")
+            is MarketUiState.NotFound -> NotFoundCard(state.barcode, onVisualLookup)
             is MarketUiState.Error -> MessageCard(Icons.Outlined.WarningAmber, "تعذر إكمال القراءة", state.message)
+        }
+    }
+}
+
+@Composable
+private fun NotFoundCard(barcode: String, onVisualLookup: (String) -> Unit) {
+    val restricted = isRestrictedCirculationBarcode(barcode)
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(Icons.Outlined.Inventory2, null, Modifier.size(34.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (restricted) "باركود متجر/ميزان داخلي" else "الباركود غير موجود في قواعد التعريف",
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+            Text(
+                if (restricted) {
+                    "الرقم $barcode ليس هوية عالمية للمنتج. صوّر واجهة العبوة وسنحاول مطابقة الاسم والعلامة والحجم مع لولو والتميمي."
+                } else {
+                    "لم نجد $barcode في المصادر المجانية الموثوقة. صوّر واجهة العبوة وسنحاول التعرف على المنتج من الاسم والعلامة والحجم بدون تخمين باركود."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(12.dp))
+            Button(onClick = { onVisualLookup(barcode) }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Outlined.Image, null)
+                Spacer(Modifier.size(8.dp))
+                Text("تعرّف من واجهة العبوة", fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
@@ -278,7 +351,7 @@ private fun LoadingCard(barcode: String) {
             CircularProgressIndicator(Modifier.size(32.dp), strokeWidth = 3.dp)
             Spacer(Modifier.size(14.dp))
             Column {
-                Text("نبحث بأسرع مسار متاح", fontWeight = FontWeight.Bold)
+                Text("نبحث بأوسع مسار مجاني موثوق", fontWeight = FontWeight.Bold)
                 Text("باركود $barcode", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
@@ -314,14 +387,19 @@ private fun ProductResult(state: MarketUiState.Found, onInfo: (ProductSnapshot) 
         ) {
             Column(Modifier.padding(18.dp)) {
                 Text(p.displayName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text("الباركود ${p.barcode}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("الباركود المقروء ${p.barcode}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(14.dp))
                 Text(p.currentPriceLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(formatPrice(p.currentPrice, p.currency), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                 p.retailer?.let { Text("في $it", fontWeight = FontWeight.SemiBold) }
-                if (!p.exactBarcodeMatch && p.headlineMatchMethod == "canonical_identity") {
-                    Text(
+                when (p.headlineMatchMethod) {
+                    "canonical_identity" -> Text(
                         "السعر مربوط بنفس المنتج والحجم، وليس بباركود منشور من المتجر.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    "visual_text_identity" -> Text(
+                        "تعرّفنا على الاسم/العلامة/الحجم بصريًا. لم نربط الباركود بهذا المنتج ولم نخزّن المطابقة كحقيقة.",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -336,8 +414,8 @@ private fun ProductResult(state: MarketUiState.Found, onInfo: (ProductSnapshot) 
         }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            PriceStat(Modifier.weight(1f), Icons.Outlined.TrendingDown, "أقل سعر 30 يوم", p.min30d, p.currency)
-            PriceStat(Modifier.weight(1f), Icons.Outlined.TrendingUp, "أعلى سعر 30 يوم", p.max30d, p.currency)
+            PriceStat(Modifier.weight(1f), Icons.AutoMirrored.Outlined.TrendingDown, "أقل سعر 30 يوم", p.min30d, p.currency)
+            PriceStat(Modifier.weight(1f), Icons.AutoMirrored.Outlined.TrendingUp, "أعلى سعر 30 يوم", p.max30d, p.currency)
         }
 
         if (p.offers.isNotEmpty()) {
@@ -364,6 +442,7 @@ private fun ProductResult(state: MarketUiState.Found, onInfo: (ProductSnapshot) 
 
         Text(
             when {
+                p.headlineMatchMethod == "visual_text_identity" -> "تطابق بصري محافظ • الصورة عولجت محليًا"
                 state.cloudResponses > 0 -> "تم التحقق من ${state.cloudResponses} سحابات"
                 state.servedFromCache -> "ظهرت النتيجة فورًا من ذاكرة الهاتف"
                 else -> "آخر Snapshot متاح"
@@ -411,6 +490,7 @@ private fun OfferRow(offer: RetailerOffer, scanned: String, cheapest: Boolean) {
                 offer.barcode == scanned -> "نفس الباركود"
                 !offer.barcode.isNullOrBlank() -> "نفس المنتج • باركود مختلف"
                 offer.matchMethod == "canonical_identity" -> "نفس المنتج • المتجر لا ينشر الباركود"
+                offer.matchMethod == "visual_text_identity" -> "تطابق بصري لنفس المنتج • الباركود غير مثبت"
                 else -> null
             }
             match?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
