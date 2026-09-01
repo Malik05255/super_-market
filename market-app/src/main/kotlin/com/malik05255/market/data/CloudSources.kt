@@ -52,9 +52,9 @@ private data class ResolveBarcodeResponse(
 class SupabaseSource(private val url: String, private val key: String) : CloudSource {
     override val id = "supabase"
     override val configured = url.isNotBlank() && key.isNotBlank()
-    // Known barcodes still return from the first indexed request. The longer ceiling is
-    // used only when that request misses and the guarded unknown-barcode resolver runs.
-    override val lookupTimeoutMs = 5_000L
+    // Known barcodes still return from the first indexed request in milliseconds.
+    // Only an unknown global GTIN can use the longer resolver path (SFDA, then OFF).
+    override val lookupTimeoutMs = 16_000L
 
     private fun io.ktor.client.request.HttpRequestBuilder.applySupabaseHeaders() {
         header("apikey", key)
