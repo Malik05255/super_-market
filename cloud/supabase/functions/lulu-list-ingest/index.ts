@@ -1,6 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 
-const UA = "MoqarinAlasaarLuLuList/1.0 (+public listed-product refresh)";
+const UA = "MoqarinAlasaarLuLuList/1.1 (+verified public listed-product refresh)";
 const BASE = "https://gcc.luluhypermarket.com";
 const LIST = `${BASE}/en-sa/list/`;
 const enc = new TextEncoder();
@@ -22,6 +22,7 @@ const PACKS = [
   /(?:pack|pk|عبوة|عبوات|حبة|حبات)\s*(?:of\s*)?(\d{1,3})(?!\d)/i,
   /(?:^|\D)(\d{1,3})\s*(?:pack|pk|pcs|pieces|حبة|حبات|عبوة|عبوات)(?!\w)/i
 ];
+const ELECTRONICS = /\b(?:smartphone|iphone|ipad|tablet|laptop|notebook|mobile\s+phone|[245]g\s+(?:smartphone|phone|mobile)|gb\s+storage)\b/i;
 
 type Identity = { key:string; variant:string|null; sv:number; su:string; pc:number };
 
@@ -62,6 +63,16 @@ function numericPrice(v:unknown){
   const n=Number(m[1]);
   return Number.isFinite(n)&&n>0&&n<=100000 ? Math.round(n*100)/100 : null;
 }
+function currencyPrice(text:string){
+  const clean=text.replace(/٬/g,"").replace(/٫/g,".");
+  for(const re of [
+    /(?:SAR|ر\.?\s?س\.?|ريال(?:\s+سعودي)?)\s*[:\-]?\s*(\d{1,7}(?:[.,]\d{1,2})?)/i,
+    /(\d{1,7}(?:[.,]\d{1,2})?)\s*(?:SAR|ر\.?\s?س\.?|ريال(?:\s+سعودي)?)/i
+  ]){
+    const m=clean.match(re); if(m){ const n=numericPrice(m[1]); if(n!==null) return n; }
+  }
+  return null;
+}
 function foldBonus(text:string){
   return text.replace(/(\d+(?:[.,]\d+)?)\s*\+\s*(\d+(?:[.,]\d+)?)\s*(g|gm|gram|kg|ml|l|ltr)\b/gi,(_m,a0,b0,u0)=>{
     const a=Number(String(a0).replace(",",".")), b=Number(String(b0).replace(",",".")), u=String(u0).toLowerCase();
@@ -74,6 +85,7 @@ function foldBonus(text:string){
   });
 }
 async function identity(name:string,brand:string):Promise<Identity|null>{
+  if(ELECTRONICS.test(name)) return null;
   const source=foldBonus(`${name} ${brand}`), nb=norm(brand);
   let sv:number|null=null, su:string|null=null;
   for(const [p,u,m] of SIZES){ const x=source.match(p); if(x){ const n=Number(x[1].replace(",","."))*m; if(n>0&&n<=100000){sv=Math.round(n*1000)/1000;su=u;break;} } }
@@ -116,7 +128,7 @@ function productUrls(h:string){
 }
 async function parseProduct(h:string,url:string){
   const hm=h.match(/<h1\b[^>]*>([\s\S]{1,1200}?)<\/h1>/i); if(!hm||hm.index==null) return null;
-  const name=plain(hm[1]); if(!name||name.length>240) return null;
+  const name=plain(hm[1]); if(!name||name.length>240||ELECTRONICS.test(name)) return null;
   const before=h.slice(Math.max(0,hm.index-5500),hm.index);
   let brand:string|null=null;
   const bm=before.match(/View\s*all\s*products\s*from[\s\S]{0,1400}?<a\b[^>]*>([\s\S]{1,300}?)<\/a>/i); if(bm) brand=plain(bm[1]);
@@ -126,7 +138,7 @@ async function parseProduct(h:string,url:string){
   if(amount===null){
     const end=hm.index+hm[0].length; let after=h.slice(end,end+6500);
     const marker=after.search(/Selected\s*Pack\s*Quantity|Product\s*Summary|Product\s*Information/i); if(marker>=0) after=after.slice(0,marker);
-    const m=plain(after).match(/(?:^|\s)(\d{1,5}(?:[.,]\d{1,2})?)(?=\s|$)/); if(m) amount=numericPrice(m[1]);
+    amount=currencyPrice(plain(after));
   }
   if(amount===null) return null;
   const id=await identity(name,brand); if(!id) return null;
