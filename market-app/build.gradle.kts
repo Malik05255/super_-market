@@ -48,8 +48,6 @@ android {
             return "\"${raw.replace("\\", "\\\\").replace("\"", "\\\"")}\""
         }
 
-        // Publishable client credentials are safe to ship with an RLS-protected read-only API.
-        // CI/environment values override these defaults only when they are non-blank.
         buildConfigField(
             "String",
             "SUPABASE_URL",
@@ -117,12 +115,15 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.coil.compose)
 
-    // High-sensitivity local scanner: direct CameraX feed + bundled ML Kit model.
+    // High-sensitivity local scanner: direct CameraX feed + bundled ML Kit models.
     implementation("androidx.camera:camera-core:1.6.2")
     implementation("androidx.camera:camera-camera2:1.6.2")
     implementation("androidx.camera:camera-lifecycle:1.6.2")
     implementation("androidx.camera:camera-view:1.6.2")
     implementation("com.google.mlkit:barcode-scanning:17.3.0")
+    // Bundled Latin OCR is immediately available offline and adds only a few MiB.
+    // It captures common bilingual packaging brand/size text without uploading images.
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.ktor.core)
