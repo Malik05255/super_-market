@@ -1,3 +1,6 @@
+import java.net.URI
+import java.security.MessageDigest
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
@@ -144,7 +147,7 @@ val prepareArabicTessdata by tasks.registering {
     doLast {
         if (output.exists() && output.length() > 1_000_000L) return@doLast
         output.parentFile.mkdirs()
-        val source = java.net.URI(
+        val source = URI(
             "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/923915d4ced2a7235221788285785a29c4a42d4a/ara.traineddata"
         ).toURL()
         val connection = source.openConnection().apply {
@@ -156,9 +159,9 @@ val prepareArabicTessdata by tasks.registering {
             output.outputStream().use { destination -> input.copyTo(destination) }
         }
         check(output.length() > 1_000_000L) { "Arabic tessdata download is unexpectedly small" }
-        val digest = java.security.MessageDigest.getInstance("SHA-256")
+        val digest = MessageDigest.getInstance("SHA-256")
             .digest(output.readBytes())
-            .joinToString("") { "%02x".format(it) }
+            .joinToString("") { byte -> "%02x".format(byte) }
         println("Arabic tessdata: ${output.length()} bytes sha256=$digest")
     }
 }
