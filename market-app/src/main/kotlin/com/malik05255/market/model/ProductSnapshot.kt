@@ -12,7 +12,8 @@ data class RetailerOffer(
     @SerialName("branch_key") val branchKey: String? = null,
     @SerialName("source_url") val sourceUrl: String? = null,
     val barcode: String? = null,
-    @SerialName("match_method") val matchMethod: String? = null
+    @SerialName("match_method") val matchMethod: String? = null,
+    @SerialName("logo_url") val logoUrl: String? = null
 )
 
 @Serializable

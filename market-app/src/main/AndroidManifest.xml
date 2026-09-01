@@ -11,14 +11,9 @@
         android:allowBackup="true"
         android:icon="@drawable/ic_market_launcher"
         android:roundIcon="@drawable/ic_market_launcher"
-        android:label="مقارن الأسعار"
+        android:label="مقارن"
         android:supportsRtl="true"
         android:theme="@style/Theme.Market">
-
-        <activity
-            android:name=".ProductTextScannerActivity"
-            android:exported="false"
-            android:screenOrientation="portrait" />
 
         <activity
             android:name=".SensitiveBarcodeScannerActivity"

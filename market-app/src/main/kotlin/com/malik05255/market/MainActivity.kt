@@ -21,8 +21,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -30,14 +30,13 @@ import androidx.compose.material.icons.automirrored.outlined.TrendingDown
 import androidx.compose.material.icons.automirrored.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudDone
-import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Inventory2
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.QrCodeScanner
 import androidx.compose.material.icons.outlined.RestaurantMenu
-import androidx.compose.material.icons.outlined.ShoppingBag
 import androidx.compose.material.icons.outlined.Storefront
+import androidx.compose.material.icons.outlined.Verified
 import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -58,7 +57,6 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -90,35 +88,40 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private val MarketGreen = Color(0xFF0B6B4F)
-private val MarketMint = Color(0xFFDDF4EA)
-private val MarketBg = Color(0xFFF7FAF8)
-private val MarketInk = Color(0xFF17211D)
+private val InkBlue = Color(0xFF10233F)
+private val ActionBlue = Color(0xFF2D63E2)
+private val SoftBlue = Color(0xFFEAF0FF)
+private val AppBackground = Color(0xFFF5F7FB)
+private val MutedInk = Color(0xFF647083)
 
 private val LightColors = lightColorScheme(
-    primary = MarketGreen,
+    primary = ActionBlue,
     onPrimary = Color.White,
-    primaryContainer = MarketMint,
-    onPrimaryContainer = Color(0xFF064632),
-    secondary = Color(0xFFF4A61C),
-    background = MarketBg,
-    onBackground = MarketInk,
+    primaryContainer = SoftBlue,
+    onPrimaryContainer = InkBlue,
+    secondary = InkBlue,
+    background = AppBackground,
+    onBackground = InkBlue,
     surface = Color.White,
-    onSurface = MarketInk,
-    surfaceVariant = Color(0xFFF0F5F2),
-    onSurfaceVariant = Color(0xFF5F6F67),
-    outlineVariant = Color(0xFFDCE6E1)
+    onSurface = InkBlue,
+    surfaceVariant = Color(0xFFF0F3F8),
+    onSurfaceVariant = MutedInk,
+    outlineVariant = Color(0xFFDDE3ED)
 )
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFF76DDB6),
-    onPrimary = Color(0xFF003829),
-    primaryContainer = Color(0xFF0B533E),
-    onPrimaryContainer = Color(0xFFB5F1D8),
-    background = Color(0xFF0F1512),
-    surface = Color(0xFF141C18),
-    surfaceVariant = Color(0xFF1D2823),
-    outlineVariant = Color(0xFF33423B)
+    primary = Color(0xFF9CB8FF),
+    onPrimary = Color(0xFF06275F),
+    primaryContainer = Color(0xFF1D3768),
+    onPrimaryContainer = Color(0xFFDCE6FF),
+    secondary = Color(0xFFC5D4F4),
+    background = Color(0xFF0C111A),
+    onBackground = Color(0xFFE7ECF5),
+    surface = Color(0xFF121925),
+    onSurface = Color(0xFFE7ECF5),
+    surfaceVariant = Color(0xFF1A2331),
+    onSurfaceVariant = Color(0xFFAEB8C8),
+    outlineVariant = Color(0xFF303B4C)
 )
 
 @Composable
@@ -126,9 +129,9 @@ private fun MarketTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = if (androidx.compose.foundation.isSystemInDarkTheme()) DarkColors else LightColors,
         shapes = Shapes(
-            small = RoundedCornerShape(14.dp),
-            medium = RoundedCornerShape(20.dp),
-            large = RoundedCornerShape(28.dp)
+            small = RoundedCornerShape(12.dp),
+            medium = RoundedCornerShape(18.dp),
+            large = RoundedCornerShape(24.dp)
         ),
         content = content
     )
@@ -140,7 +143,6 @@ private fun MarketScreen(viewModel: MarketViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val healthy by viewModel.healthyClouds.collectAsStateWithLifecycle()
     var info by remember { mutableStateOf<ProductSnapshot?>(null) }
-    var autoVisualAttempted by remember { mutableStateOf(emptySet<String>()) }
     val context = LocalContext.current
 
     val scannerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -152,31 +154,6 @@ private fun MarketScreen(viewModel: MarketViewModel) {
         }
     }
 
-    val visualLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val barcode = result.data?.getStringExtra(ProductTextScannerActivity.EXTRA_INPUT_BARCODE).orEmpty()
-            val text = result.data?.getStringExtra(ProductTextScannerActivity.EXTRA_RECOGNIZED_TEXT).orEmpty()
-            if (barcode.isNotBlank() && text.isNotBlank()) viewModel.lookupByText(barcode, text)
-        } else {
-            result.data?.getStringExtra("error")?.takeIf { it.isNotBlank() }?.let(viewModel::scannerFailed)
-        }
-    }
-
-    fun launchVisual(barcode: String) {
-        visualLauncher.launch(
-            Intent(context, ProductTextScannerActivity::class.java)
-                .putExtra(ProductTextScannerActivity.EXTRA_INPUT_BARCODE, barcode)
-        )
-    }
-
-    LaunchedEffect(state) {
-        val missing = state as? MarketUiState.NotFound ?: return@LaunchedEffect
-        if (missing.barcode !in autoVisualAttempted) {
-            autoVisualAttempted = autoVisualAttempted + missing.barcode
-            launchVisual(missing.barcode)
-        }
-    }
-
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         Scaffold(containerColor = MaterialTheme.colorScheme.background) { insets ->
             Column(
@@ -184,34 +161,17 @@ private fun MarketScreen(viewModel: MarketViewModel) {
                     .fillMaxSize()
                     .padding(insets)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp, vertical = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                Header(healthy, viewModel.configuredClouds)
-                Spacer(Modifier.height(16.dp))
-                ProductImage(state)
-                Spacer(Modifier.height(14.dp))
-                Button(
-                    onClick = {
+                AppHeader(healthy = healthy, configured = viewModel.configuredClouds)
+                ScanHero(
+                    onScan = {
                         scannerLauncher.launch(Intent(context, SensitiveBarcodeScannerActivity::class.java))
-                    },
-                    modifier = Modifier.fillMaxWidth().height(62.dp),
-                    shape = RoundedCornerShape(20.dp)
-                ) {
-                    Icon(Icons.Outlined.QrCodeScanner, null, Modifier.size(25.dp))
-                    Spacer(Modifier.size(10.dp))
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("اقرأ الباركود", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("باركود أولًا • ثم تعرّف بصري تلقائي عند الحاجة", style = MaterialTheme.typography.labelSmall)
                     }
-                }
-                Spacer(Modifier.height(16.dp))
-                Result(
-                    state = state,
-                    onInfo = { info = it },
-                    onVisualLookup = ::launchVisual
                 )
-                Spacer(Modifier.height(28.dp))
+                Result(state = state, onInfo = { info = it })
+                Spacer(Modifier.height(20.dp))
             }
         }
 
@@ -220,125 +180,139 @@ private fun MarketScreen(viewModel: MarketViewModel) {
 }
 
 @Composable
-private fun Header(healthy: Int, configured: Int) {
+private fun AppHeader(healthy: Int, configured: Int) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Surface(Modifier.size(50.dp), RoundedCornerShape(17.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+        Surface(
+            modifier = Modifier.size(44.dp),
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.secondary
+        ) {
             Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Outlined.ShoppingBag, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(27.dp))
+                Icon(
+                    Icons.Outlined.QrCodeScanner,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
             }
         }
-        Spacer(Modifier.size(12.dp))
+        Spacer(Modifier.size(11.dp))
         Column(Modifier.weight(1f)) {
-            Text("مقارن الأسعار", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Black)
-            Text("امسح • تعرّف • قارن • وفر", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        if (configured > 0) {
-            Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                Row(Modifier.padding(horizontal = 10.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.CloudDone, null, Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.size(5.dp))
-                    Text("$healthy/$configured", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                }
-            }
-        }
-    }
-    Spacer(Modifier.height(11.dp))
-    Surface(Modifier.fillMaxWidth(), RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.CheckCircle, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.size(7.dp))
+            Text("مقارن", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
             Text(
-                "نفس الباركود أولًا • هوية موثوقة • تطابق بصري عند غياب الباركود",
-                style = MaterialTheme.typography.labelMedium,
+                "اعرف المنتج، ثم قارن السعر",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        ConnectionPill(healthy, configured)
+    }
+}
+
+@Composable
+private fun ConnectionPill(healthy: Int, configured: Int) {
+    val online = configured > 0 && healthy > 0
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = if (online) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                if (online) Icons.Outlined.CloudDone else Icons.Outlined.CheckCircle,
+                contentDescription = null,
+                tint = if (online) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(15.dp)
+            )
+            Spacer(Modifier.size(5.dp))
+            Text(
+                if (online) "متصل" else "جاهز",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold
             )
         }
     }
 }
 
 @Composable
-private fun ProductImage(state: MarketUiState) {
-    val product = (state as? MarketUiState.Found)?.product
+private fun ScanHero(onScan: () -> Unit) {
     Card(
-        Modifier.fillMaxWidth().height(260.dp),
-        shape = RoundedCornerShape(30.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(26.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondary),
     ) {
-        Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-            val imageUrl = product?.imageUrl
-            if (!imageUrl.isNullOrBlank()) {
-                AsyncImage(
-                    model = imageUrl,
-                    contentDescription = product.displayName,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(22.dp))
-                )
-            } else {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Surface(Modifier.size(82.dp), CircleShape, color = MaterialTheme.colorScheme.surfaceVariant) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(Icons.Outlined.Image, null, Modifier.size(40.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    Text("صورة المنتج", fontWeight = FontWeight.Bold)
-                    Text("تظهر تلقائيًا بعد التعرف", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(Modifier.padding(20.dp)) {
+            Surface(
+                modifier = Modifier.size(48.dp),
+                shape = RoundedCornerShape(15.dp),
+                color = Color.White.copy(alpha = 0.12f)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(Icons.Outlined.QrCodeScanner, null, tint = Color.White, modifier = Modifier.size(27.dp))
                 }
+            }
+            Spacer(Modifier.height(18.dp))
+            Text(
+                "امسح الباركود",
+                color = Color.White,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Black
+            )
+            Text(
+                "نحدد هوية المنتج أولًا، ثم نبحث عن أسعاره تلقائيًا.",
+                color = Color.White.copy(alpha = 0.76f),
+                style = MaterialTheme.typography.bodyMedium
+            )
+            Spacer(Modifier.height(18.dp))
+            Button(
+                onClick = onScan,
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Icon(Icons.Outlined.QrCodeScanner, null, Modifier.size(22.dp))
+                Spacer(Modifier.size(8.dp))
+                Text("ابدأ المسح", fontWeight = FontWeight.Bold)
             }
         }
     }
 }
 
 @Composable
-private fun Result(
-    state: MarketUiState,
-    onInfo: (ProductSnapshot) -> Unit,
-    onVisualLookup: (String) -> Unit
-) {
+private fun Result(state: MarketUiState, onInfo: (ProductSnapshot) -> Unit) {
     Box(Modifier.fillMaxWidth().animateContentSize()) {
         when (state) {
-            MarketUiState.Idle -> MessageCard(Icons.Outlined.QrCodeScanner, "جاهز للمسح", "وجّه الكاميرا للباركود. إذا لم يوجد، سننتقل تلقائيًا للتعرف من واجهة العبوة.")
+            MarketUiState.Idle -> IdleCard()
             is MarketUiState.Loading -> LoadingCard(state.barcode)
             is MarketUiState.Found -> ProductResult(state, onInfo)
-            is MarketUiState.NotFound -> NotFoundCard(state.barcode, onVisualLookup)
-            is MarketUiState.Error -> MessageCard(Icons.Outlined.WarningAmber, "تعذر إكمال القراءة", state.message)
+            is MarketUiState.NotFound -> NotFoundCard(state.barcode)
+            is MarketUiState.Error -> MessageCard(
+                icon = Icons.Outlined.WarningAmber,
+                title = "تعذر إكمال المسح",
+                body = state.message
+            )
         }
     }
 }
 
 @Composable
-private fun NotFoundCard(barcode: String, onVisualLookup: (String) -> Unit) {
-    val restricted = isRestrictedCirculationBarcode(barcode)
-    Card(
-        Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+private fun IdleCard() {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant
     ) {
-        Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Outlined.Inventory2, null, Modifier.size(34.dp), tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                if (restricted) "باركود متجر/ميزان داخلي" else "الباركود غير موجود في قواعد التعريف",
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-            Text(
-                if (restricted) {
-                    "الرقم $barcode ليس هوية عالمية للمنتج. صوّر واجهة العبوة وسنحاول مطابقة الاسم والعلامة والحجم مع لولو والتميمي."
-                } else {
-                    "لم نجد $barcode في المصادر المجانية الموثوقة. صوّر واجهة العبوة وسنحاول التعرف على المنتج من الاسم والعلامة والحجم بدون تخمين باركود."
-                },
-                style = MaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(Modifier.height(12.dp))
-            Button(onClick = { onVisualLookup(barcode) }, modifier = Modifier.fillMaxWidth()) {
-                Icon(Icons.Outlined.Image, null)
-                Spacer(Modifier.size(8.dp))
-                Text("تعرّف من واجهة العبوة", fontWeight = FontWeight.Bold)
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Outlined.Verified, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(23.dp))
+            Spacer(Modifier.size(10.dp))
+            Column {
+                Text("الباركود للهوية، وليس للمتجر", fontWeight = FontWeight.Bold)
+                Text(
+                    "حتى لو لم يكن المنتج في لولو أو التميمي، نحاول معرفة اسمه أولًا ثم نبحث عن توفره.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -346,113 +320,326 @@ private fun NotFoundCard(barcode: String, onVisualLookup: (String) -> Unit) {
 
 @Composable
 private fun LoadingCard(barcode: String) {
-    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Row(Modifier.padding(20.dp), verticalAlignment = Alignment.CenterVertically) {
-            CircularProgressIndicator(Modifier.size(32.dp), strokeWidth = 3.dp)
-            Spacer(Modifier.size(14.dp))
-            Column {
-                Text("نبحث بأوسع مسار مجاني موثوق", fontWeight = FontWeight.Bold)
-                Text("باركود $barcode", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Row(Modifier.padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(Modifier.size(30.dp), strokeWidth = 3.dp)
+            Spacer(Modifier.size(13.dp))
+            Column(Modifier.weight(1f)) {
+                Text("نتعرف على المنتج…", fontWeight = FontWeight.Bold)
+                Text(
+                    "ثم تظهر أسعار المتاجر فور وصولها",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
+            Text(barcode, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 @Composable
-private fun MessageCard(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, body: String) {
+private fun NotFoundCard(barcode: String) {
+    val restricted = isRestrictedCirculationBarcode(barcode)
+    MessageCard(
+        icon = Icons.Outlined.Inventory2,
+        title = if (restricted) "باركود داخلي" else "لم نجد هوية موثوقة بعد",
+        body = if (restricted) {
+            "الرقم $barcode يبدو باركود متجر أو ميزان، وليس رقم GTIN عالميًا يمكن منه تحديد المنتج خارج ذلك المتجر."
+        } else {
+            "بحثنا عن $barcode ولم نجد اسم منتج مؤكدًا. لن نخمن الاسم أو نعرض سعر منتج مختلف."
+        }
+    )
+}
+
+@Composable
+private fun MessageCard(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    body: String
+) {
     Card(
-        Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(24.dp),
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
-        Column(Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(icon, null, Modifier.size(34.dp), tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(8.dp))
-            Text(title, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-            Text(body, style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.padding(18.dp), verticalAlignment = Alignment.Top) {
+            Surface(
+                modifier = Modifier.size(42.dp),
+                shape = RoundedCornerShape(13.dp),
+                color = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(icon, null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.primary)
+                }
+            }
+            Spacer(Modifier.size(11.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.Bold)
+                Text(body, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
 
 @Composable
 private fun ProductResult(state: MarketUiState.Found, onInfo: (ProductSnapshot) -> Unit) {
-    val p = state.product
+    val product = state.product
+    val bestOffer = product.offers.minByOrNull { it.price }
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Card(
-            Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(26.dp),
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
         ) {
             Column(Modifier.padding(18.dp)) {
-                Text(p.displayName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                Text("الباركود المقروء ${p.barcode}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(14.dp))
-                Text(p.currentPriceLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(formatPrice(p.currentPrice, p.currency), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
-                p.retailer?.let { Text("في $it", fontWeight = FontWeight.SemiBold) }
-                when (p.headlineMatchMethod) {
-                    "canonical_identity" -> Text(
-                        "السعر مربوط بنفس المنتج والحجم، وليس بباركود منشور من المتجر.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    "visual_text_identity" -> Text(
-                        "تعرّفنا على الاسم/العلامة/الحجم بصريًا. لم نربط الباركود بهذا المنتج ولم نخزّن المطابقة كحقيقة.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                Row(verticalAlignment = Alignment.Top) {
+                    Column(Modifier.weight(1f)) {
+                        IdentityBadge(product)
+                        Spacer(Modifier.height(9.dp))
+                        Text(
+                            product.displayName,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Black,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        product.nameEn?.takeIf { it.isNotBlank() && it != product.displayName }?.let {
+                            Text(
+                                it,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            product.barcode,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    ProductMedia(product, state.allowProductMedia)
                 }
+
+                Spacer(Modifier.height(18.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Spacer(Modifier.height(16.dp))
+
+                Text(
+                    if (bestOffer != null) "أفضل سعر متاح الآن" else product.currentPriceLabel,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                val bestPrice = bestOffer?.price ?: product.currentPrice
+                val bestCurrency = bestOffer?.currency ?: product.currency
+                Text(
+                    formatPrice(bestPrice, bestCurrency),
+                    style = MaterialTheme.typography.headlineLarge,
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                (bestOffer?.retailer ?: product.retailer)?.let {
+                    Text(it, fontWeight = FontWeight.SemiBold)
+                }
+
                 Spacer(Modifier.height(14.dp))
-                OutlinedButton(onClick = { onInfo(p) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
-                    Icon(Icons.Outlined.Info, null)
+                OutlinedButton(
+                    onClick = { onInfo(product) },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Icon(Icons.Outlined.Info, null, Modifier.size(19.dp))
                     Spacer(Modifier.size(7.dp))
-                    Text("معلومات المنتج", fontWeight = FontWeight.Bold)
+                    Text("تفاصيل المنتج", fontWeight = FontWeight.Bold)
                 }
             }
+        }
+
+        if (product.offers.isNotEmpty()) {
+            OffersCard(product.offers, product.barcode, state.storeMediaRetailers)
         }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            PriceStat(Modifier.weight(1f), Icons.AutoMirrored.Outlined.TrendingDown, "أقل سعر 30 يوم", p.min30d, p.currency)
-            PriceStat(Modifier.weight(1f), Icons.AutoMirrored.Outlined.TrendingUp, "أعلى سعر 30 يوم", p.max30d, p.currency)
-        }
-
-        if (p.offers.isNotEmpty()) {
-            Card(
-                Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(26.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-            ) {
-                Column(Modifier.padding(18.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Outlined.Storefront, null, tint = MaterialTheme.colorScheme.primary)
-                        Spacer(Modifier.size(7.dp))
-                        Text("أسعار السوبرماركت", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    p.offers.forEachIndexed { index, offer ->
-                        OfferRow(offer, p.barcode, cheapest = index == 0)
-                        if (index != p.offers.lastIndex) HorizontalDivider()
-                    }
-                }
-            }
+            PriceStat(
+                modifier = Modifier.weight(1f),
+                icon = Icons.AutoMirrored.Outlined.TrendingDown,
+                label = "أقل 30 يوم",
+                value = product.min30d,
+                currency = product.currency
+            )
+            PriceStat(
+                modifier = Modifier.weight(1f),
+                icon = Icons.AutoMirrored.Outlined.TrendingUp,
+                label = "أعلى 30 يوم",
+                value = product.max30d,
+                currency = product.currency
+            )
         }
 
         Text(
-            when {
-                p.headlineMatchMethod == "visual_text_identity" -> "تطابق بصري محافظ • الصورة عولجت محليًا"
-                state.cloudResponses > 0 -> "تم التحقق من ${state.cloudResponses} سحابات"
-                state.servedFromCache -> "ظهرت النتيجة فورًا من ذاكرة الهاتف"
-                else -> "آخر Snapshot متاح"
-            },
+            resultStatus(state),
             modifier = Modifier.fillMaxWidth(),
             textAlign = TextAlign.Center,
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
+}
+
+@Composable
+private fun IdentityBadge(product: ProductSnapshot) {
+    val label = when {
+        product.exactBarcodeMatch -> "باركود مطابق"
+        product.canonicalProductId != null -> "هوية منتج مؤكدة"
+        else -> "تم التعرف"
+    }
+    Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primaryContainer) {
+        Row(
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Outlined.Verified, null, Modifier.size(15.dp), tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.size(5.dp))
+            Text(label, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun ProductMedia(product: ProductSnapshot, allowed: Boolean) {
+    val imageUrl = product.imageUrl?.takeIf { allowed && it.isNotBlank() } ?: return
+    Spacer(Modifier.size(12.dp))
+    Surface(
+        modifier = Modifier.size(86.dp),
+        shape = RoundedCornerShape(18.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        AsyncImage(
+            model = imageUrl,
+            contentDescription = product.displayName,
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxSize().padding(8.dp).clip(RoundedCornerShape(12.dp))
+        )
+    }
+}
+
+@Composable
+private fun OffersCard(
+    offers: List<RetailerOffer>,
+    scannedBarcode: String,
+    storeMediaRetailers: Set<String>
+) {
+    val sorted = offers.sortedBy { it.price }
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
+        Column(Modifier.padding(horizontal = 18.dp, vertical = 16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Storefront, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(21.dp))
+                Spacer(Modifier.size(7.dp))
+                Text("الأسعار المتاحة", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.weight(1f))
+                Text("${sorted.size}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.height(7.dp))
+            sorted.forEachIndexed { index, offer ->
+                OfferRow(
+                    offer = offer,
+                    scanned = scannedBarcode,
+                    cheapest = index == 0,
+                    allowStoreMedia = normalizedRetailerKey(offer.retailer) in storeMediaRetailers
+                )
+                if (index != sorted.lastIndex) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun OfferRow(
+    offer: RetailerOffer,
+    scanned: String,
+    cheapest: Boolean,
+    allowStoreMedia: Boolean
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        StoreMark(offer, allowStoreMedia)
+        Spacer(Modifier.size(10.dp))
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(offer.retailer, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                if (cheapest) {
+                    Spacer(Modifier.size(7.dp))
+                    Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primaryContainer) {
+                        Text(
+                            "الأفضل",
+                            Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+            offerMatchLabel(offer, scanned)?.let {
+                Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Text(
+            formatPrice(offer.price, offer.currency),
+            fontWeight = FontWeight.Black,
+            style = MaterialTheme.typography.titleMedium
+        )
+    }
+}
+
+@Composable
+private fun StoreMark(offer: RetailerOffer, allowStoreMedia: Boolean) {
+    val logoUrl = offer.logoUrl?.takeIf { allowStoreMedia && it.isNotBlank() }
+    Surface(
+        modifier = Modifier.size(42.dp),
+        shape = RoundedCornerShape(13.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant
+    ) {
+        if (logoUrl != null) {
+            AsyncImage(
+                model = logoUrl,
+                contentDescription = offer.retailer,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize().padding(6.dp)
+            )
+        } else {
+            Box(contentAlignment = Alignment.Center) {
+                Text(
+                    offer.retailer.trim().firstOrNull()?.toString().orEmpty(),
+                    fontWeight = FontWeight.Black,
+                    color = MaterialTheme.colorScheme.secondary
+                )
+            }
+        }
+    }
+}
+
+private fun offerMatchLabel(offer: RetailerOffer, scanned: String): String? = when {
+    offer.barcode == scanned -> "نفس الباركود"
+    !offer.barcode.isNullOrBlank() -> "نفس المنتج"
+    offer.matchMethod == "canonical_identity" -> "مطابقة هوية المنتج"
+    else -> null
 }
 
 @Composable
@@ -463,9 +650,9 @@ private fun PriceStat(
     value: Double?,
     currency: String
 ) {
-    Card(modifier, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+    Surface(modifier = modifier, shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
         Column(Modifier.padding(14.dp)) {
-            Icon(icon, null, Modifier.size(21.dp), tint = MaterialTheme.colorScheme.primary)
+            Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(7.dp))
             Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(formatPrice(value, currency), fontWeight = FontWeight.Bold)
@@ -473,30 +660,11 @@ private fun PriceStat(
     }
 }
 
-@Composable
-private fun OfferRow(offer: RetailerOffer, scanned: String, cheapest: Boolean) {
-    Row(Modifier.fillMaxWidth().padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(offer.retailer, fontWeight = FontWeight.Bold)
-                if (cheapest) {
-                    Spacer(Modifier.size(7.dp))
-                    Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                        Text("الأرخص", Modifier.padding(horizontal = 7.dp, vertical = 3.dp), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                    }
-                }
-            }
-            val match = when {
-                offer.barcode == scanned -> "نفس الباركود"
-                !offer.barcode.isNullOrBlank() -> "نفس المنتج • باركود مختلف"
-                offer.matchMethod == "canonical_identity" -> "نفس المنتج • المتجر لا ينشر الباركود"
-                offer.matchMethod == "visual_text_identity" -> "تطابق بصري لنفس المنتج • الباركود غير مثبت"
-                else -> null
-            }
-            match?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
-        }
-        Text(formatPrice(offer.price, offer.currency), fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
-    }
+private fun resultStatus(state: MarketUiState.Found): String = when {
+    state.servedFromCache && state.cloudResponses > 0 -> "ظهرت النتيجة من الذاكرة فورًا ثم تم تحديثها من المصادر"
+    state.servedFromCache -> "ظهرت النتيجة فورًا من ذاكرة الهاتف"
+    state.cloudResponses > 0 -> "تظهر النتائج تدريجيًا فور وصولها"
+    else -> "آخر بيانات موثوقة متاحة"
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -514,7 +682,7 @@ private fun ProductInfoSheet(product: ProductSnapshot, onDismiss: () -> Unit) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Info, null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.size(8.dp))
-                Text("معلومات المنتج", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
+                Text("تفاصيل المنتج", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black)
             }
             Spacer(Modifier.height(4.dp))
             Text(product.displayName, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -526,23 +694,45 @@ private fun ProductInfoSheet(product: ProductSnapshot, onDismiss: () -> Unit) {
                 InfoSection(
                     Icons.Outlined.Public,
                     "بلد/مكان التصنيع",
-                    listOfNotNull(info.manufacturingCountry, info.manufacturingPlaces).joinToString(" • ").ifBlank { "غير متوفر" }
+                    listOfNotNull(info.manufacturingCountry, info.manufacturingPlaces)
+                        .joinToString(" • ")
+                        .ifBlank { "غير متوفر" }
                 )
                 InfoSection(Icons.Outlined.RestaurantMenu, "المكونات", info.ingredients ?: "غير متوفرة")
-                if (info.allergens.isNotEmpty()) InfoSection(Icons.Outlined.WarningAmber, "مسببات الحساسية", info.allergens.joinToString(" • "))
-                if (info.positiveNotes.isNotEmpty()) InfoSection(Icons.Outlined.CheckCircle, "ملاحظات إيجابية على التركيبة", info.positiveNotes.joinToString("\n• ", prefix = "• "))
-                if (info.cautionNotes.isNotEmpty()) InfoSection(Icons.Outlined.WarningAmber, "ملاحظات تحتاج الانتباه", info.cautionNotes.joinToString("\n• ", prefix = "• "))
+                if (info.allergens.isNotEmpty()) {
+                    InfoSection(Icons.Outlined.WarningAmber, "مسببات الحساسية", info.allergens.joinToString(" • "))
+                }
+                if (info.positiveNotes.isNotEmpty()) {
+                    InfoSection(
+                        Icons.Outlined.CheckCircle,
+                        "ملاحظات إيجابية",
+                        info.positiveNotes.joinToString("\n• ", prefix = "• ")
+                    )
+                }
+                if (info.cautionNotes.isNotEmpty()) {
+                    InfoSection(
+                        Icons.Outlined.WarningAmber,
+                        "ملاحظات تحتاج الانتباه",
+                        info.cautionNotes.joinToString("\n• ", prefix = "• ")
+                    )
+                }
             }
-            Spacer(Modifier.height(10.dp))
-            Text("المعلومات الغذائية وصف للبيانات المتاحة وليست تشخيصًا طبيًا.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
 
 @Composable
-private fun InfoSection(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, body: String) {
+private fun InfoSection(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    body: String
+) {
     Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.Top) {
-        Surface(Modifier.size(40.dp), RoundedCornerShape(13.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+        Surface(
+            modifier = Modifier.size(40.dp),
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.primaryContainer
+        ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
             }
@@ -555,5 +745,8 @@ private fun InfoSection(icon: androidx.compose.ui.graphics.vector.ImageVector, t
     }
 }
 
-private fun formatPrice(value: Double?, currency: String): String =
-    value?.let { String.format(java.util.Locale.US, "%.2f %s", it, currency) } ?: "غير متوفر"
+private fun formatPrice(value: Double?, currency: String): String = when {
+    value == null -> "غير متوفر"
+    currency.equals("SAR", ignoreCase = true) -> String.format(java.util.Locale.US, "%.2f ر.س", value)
+    else -> String.format(java.util.Locale.US, "%.2f %s", value, currency)
+}

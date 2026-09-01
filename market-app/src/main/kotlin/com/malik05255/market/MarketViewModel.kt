@@ -19,7 +19,13 @@ import kotlinx.coroutines.launch
 sealed interface MarketUiState {
     data object Idle : MarketUiState
     data class Loading(val barcode: String) : MarketUiState
-    data class Found(val product: ProductSnapshot, val cloudResponses: Int, val servedFromCache: Boolean) : MarketUiState
+    data class Found(
+        val product: ProductSnapshot,
+        val cloudResponses: Int,
+        val servedFromCache: Boolean,
+        val allowProductMedia: Boolean,
+        val storeMediaRetailers: Set<String>
+    ) : MarketUiState
     data class NotFound(val barcode: String) : MarketUiState
     data class Error(val message: String) : MarketUiState
 }
@@ -34,6 +40,8 @@ internal fun isRestrictedCirculationBarcode(barcode: String): Boolean {
     }
 }
 
+internal fun normalizedRetailerKey(value: String): String = value.trim().lowercase()
+
 class MarketViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = MarketRepository(
         application,
@@ -43,6 +51,7 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
             FirebaseSource(BuildConfig.FIREBASE_DATABASE_URL)
         )
     )
+    private val mediaDemand = MediaDemandTracker(application)
 
     private val _state = MutableStateFlow<MarketUiState>(MarketUiState.Idle)
     val state: StateFlow<MarketUiState> = _state.asStateFlow()
@@ -65,62 +74,72 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
             _state.value = MarketUiState.Error("الباركود غير صالح")
             return
         }
-        // Store/scale barcodes cannot be resolved globally. Send them to the same NotFound
-        // state so the UI can offer the visual package fallback rather than stopping here.
         if (isRestrictedCirculationBarcode(barcode)) {
             _state.value = MarketUiState.NotFound(barcode)
             return
         }
+
+        val allowProductMedia = mediaDemand.recordProductScan(barcode)
         viewModelScope.launch {
             _state.value = MarketUiState.Loading(barcode)
             val results = mutableListOf<ProductSnapshot>()
+            val recordedRetailers = mutableSetOf<String>()
+
             repository.lookup(barcode).collect { product ->
                 results += product
+                val merged = merge(barcode, results)
+
+                merged.offers.forEach { offer ->
+                    val retailerKey = normalizedRetailerKey(offer.retailer)
+                    if (recordedRetailers.add(retailerKey)) {
+                        mediaDemand.recordRetailerSeen(offer.retailer, barcode)
+                    }
+                }
+
+                val storeMediaRetailers = merged.offers
+                    .asSequence()
+                    .filter { mediaDemand.isRetailerMediaAllowed(it.retailer) }
+                    .map { normalizedRetailerKey(it.retailer) }
+                    .toSet()
+
                 _state.value = MarketUiState.Found(
-                    product = merge(barcode, results),
+                    product = merged,
                     cloudResponses = results.mapNotNull { it.cloudSource }
-                        .filterNot { it == MarketRepository.LOCAL_CACHE }.distinct().size,
-                    servedFromCache = results.any { it.cloudSource == MarketRepository.LOCAL_CACHE }
+                        .filterNot { it == MarketRepository.LOCAL_CACHE }
+                        .distinct()
+                        .size,
+                    servedFromCache = results.any { it.cloudSource == MarketRepository.LOCAL_CACHE },
+                    allowProductMedia = allowProductMedia || mediaDemand.isProductMediaAllowed(barcode),
+                    storeMediaRetailers = storeMediaRetailers
                 )
             }
             if (results.isEmpty()) _state.value = MarketUiState.NotFound(barcode)
         }
     }
 
-    fun lookupByText(barcode: String, recognizedText: String) {
-        val cleanBarcode = barcode.trim()
-        val cleanText = recognizedText.trim()
-        if (cleanText.length < 4) {
-            _state.value = MarketUiState.Error("لم يظهر نص كافٍ للتعرف على المنتج")
-            return
-        }
-        viewModelScope.launch {
-            _state.value = MarketUiState.Loading(cleanBarcode)
-            val product = repository.lookupByText(cleanBarcode, cleanText)
-            _state.value = if (product != null) {
-                MarketUiState.Found(
-                    product = product.copy(barcode = cleanBarcode),
-                    cloudResponses = 1,
-                    servedFromCache = false
-                )
-            } else {
-                MarketUiState.NotFound(cleanBarcode)
-            }
-        }
-    }
-
     private fun merge(barcode: String, results: List<ProductSnapshot>): ProductSnapshot {
         val direct = results.filter { it.currentPrice != null }.maxByOrNull { score(it.priceUpdatedAt) }
         val base = direct ?: results.first()
-        val metadata = results.firstOrNull { !it.nameAr.isNullOrBlank() || !it.nameEn.isNullOrBlank() || !it.imageUrl.isNullOrBlank() } ?: base
+        val metadata = results.firstOrNull {
+            !it.nameAr.isNullOrBlank() || !it.nameEn.isNullOrBlank() || !it.imageUrl.isNullOrBlank()
+        } ?: base
         val info: ProductInfo? = results.mapNotNull { it.productInfo }.firstOrNull { it.hasUsefulData }
         val offers = results.flatMap { snapshot ->
             if (snapshot.offers.isNotEmpty()) snapshot.offers
             else snapshot.currentPrice?.let { price ->
-                listOf(RetailerOffer(snapshot.retailer ?: return@let emptyList<RetailerOffer>(), price, snapshot.currency, snapshot.priceUpdatedAt, barcode = barcode))
+                listOf(
+                    RetailerOffer(
+                        retailer = snapshot.retailer ?: return@let emptyList<RetailerOffer>(),
+                        price = price,
+                        currency = snapshot.currency,
+                        updatedAt = snapshot.priceUpdatedAt,
+                        barcode = barcode
+                    )
+                )
             } ?: emptyList()
-        }.groupBy { "${it.retailer.lowercase()}|${it.branchKey.orEmpty().lowercase()}|${it.barcode.orEmpty()}" }
-            .mapNotNull { (_, list) -> list.maxByOrNull { score(it.updatedAt) } }
+        }.groupBy {
+            "${it.retailer.lowercase()}|${it.branchKey.orEmpty().lowercase()}|${it.barcode.orEmpty()}"
+        }.mapNotNull { (_, list) -> list.maxByOrNull { score(it.updatedAt) } }
             .sortedBy { it.price }
 
         return base.copy(
@@ -139,5 +158,6 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
         )
     }
 
-    private fun score(value: String?): Long = runCatching { Instant.parse(value).toEpochMilli() }.getOrDefault(Long.MIN_VALUE)
+    private fun score(value: String?): Long =
+        runCatching { Instant.parse(value).toEpochMilli() }.getOrDefault(Long.MIN_VALUE)
 }
