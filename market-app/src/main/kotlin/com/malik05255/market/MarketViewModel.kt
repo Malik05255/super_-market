@@ -24,6 +24,20 @@ sealed interface MarketUiState {
     data class Error(val message: String) : MarketUiState
 }
 
+internal fun isRestrictedCirculationBarcode(barcode: String): Boolean {
+    if (!barcode.all(Char::isDigit)) return false
+    return when (barcode.length) {
+        // GS1 VMN-12 / RCN-12 uses UPC prefix 2 for retailer or variable-measure numbering.
+        12 -> barcode.startsWith("2")
+        // GS1 RCN-13 uses prefixes 20 through 29 for restricted distribution.
+        13 -> barcode.take(2).toIntOrNull() in 20..29
+        // RCN-8 can use prefix 2. We intentionally do not classify prefix 0 here to
+        // avoid surprising legitimate EAN-8 scans in markets where that prefix is used.
+        8 -> barcode.startsWith("2")
+        else -> false
+    }
+}
+
 class MarketViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = MarketRepository(
         application,
@@ -53,6 +67,13 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
         val barcode = raw?.trim().orEmpty()
         if (!barcode.matches(Regex("^[0-9]{8,14}$"))) {
             _state.value = MarketUiState.Error("الباركود غير صالح")
+            return
+        }
+        if (isRestrictedCirculationBarcode(barcode)) {
+            _state.value = MarketUiState.Error(
+                "هذا باركود متجر أو ميزان داخلي، وليس باركود المنتج العالمي. " +
+                    "امسح الباركود الأصلي المطبوع على عبوة الشركة حتى أتعرف على المنتج وأقارن سعره."
+            )
             return
         }
         viewModelScope.launch {
