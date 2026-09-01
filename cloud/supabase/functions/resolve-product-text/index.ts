@@ -46,6 +46,10 @@ function canonicalWords(value:string){
     [/دايت/gi," diet "],
     [/لايت/gi," light "],
     [/اصلي|أصلي/gi," original "],
+    [/(?:مليلتر|مللي\s*لتر|مل)\b/gi," ml "],
+    [/(?:جرام|غرام|جم)\b/gi," g "],
+    [/(?:كيلوجرام|كيلو\s*جرام|كجم|كيلو)\b/gi," kg "],
+    [/(?:لتر)\b/gi," l "],
   ];
   for(const[re,to]of replacements)s=s.replace(re,to);
   return s;
@@ -65,10 +69,10 @@ type Size={value:number;unit:"g"|"ml"};
 function sizes(value:string):Size[]{
   const s=norm(value),out:Size[]=[];
   const patterns:Array<[RegExp,"g"|"ml",number]>=[
-    [/\b(\d+(?:[.]\d+)?)\s*(?:g|gm|gram|جرام|غرام)\b/gi,"g",1],
-    [/\b(\d+(?:[.]\d+)?)\s*(?:kg|kilogram|كيلو|كجم)\b/gi,"g",1000],
-    [/\b(\d+(?:[.]\d+)?)\s*(?:ml|مل|مليلتر)\b/gi,"ml",1],
-    [/\b(\d+(?:[.]\d+)?)\s*(?:l|ltr|liter|litre|لتر)\b/gi,"ml",1000],
+    [/\b(\d+(?:[.]\d+)?)\s*(?:g|gm|gram)\b/gi,"g",1],
+    [/\b(\d+(?:[.]\d+)?)\s*(?:kg|kilogram)\b/gi,"g",1000],
+    [/\b(\d+(?:[.]\d+)?)\s*ml\b/gi,"ml",1],
+    [/\b(\d+(?:[.]\d+)?)\s*(?:l|ltr|liter|litre)\b/gi,"ml",1000],
   ];
   for(const[re,unit,m]of patterns)for(const x of s.matchAll(re)){
     const n=Number(x[1])*m;
