@@ -1,6 +1,7 @@
 package com.malik05255.market
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -20,7 +21,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ExperimentalGetImage
 import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
@@ -37,7 +37,6 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
-@ExperimentalGetImage
 class SensitiveBarcodeScannerActivity : ComponentActivity() {
     companion object {
         const val EXTRA_BARCODE = "barcode"
@@ -150,6 +149,7 @@ class SensitiveBarcodeScannerActivity : ComponentActivity() {
         return root
     }
 
+    @SuppressLint("UnsafeOptInUsageError")
     private fun startCamera() {
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
