@@ -27,12 +27,8 @@ sealed interface MarketUiState {
 internal fun isRestrictedCirculationBarcode(barcode: String): Boolean {
     if (!barcode.all(Char::isDigit)) return false
     return when (barcode.length) {
-        // GS1 VMN-12 / RCN-12 uses UPC prefix 2 for retailer or variable-measure numbering.
         12 -> barcode.startsWith("2")
-        // GS1 RCN-13 uses prefixes 20 through 29 for restricted distribution.
         13 -> barcode.take(2).toIntOrNull() in 20..29
-        // RCN-8 can use prefix 2. We intentionally do not classify prefix 0 here to
-        // avoid surprising legitimate EAN-8 scans in markets where that prefix is used.
         8 -> barcode.startsWith("2")
         else -> false
     }
@@ -60,7 +56,7 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun scannerFailed(message: String?) {
-        _state.value = MarketUiState.Error(message?.takeIf { it.isNotBlank() } ?: "تعذر تشغيل قارئ الباركود")
+        _state.value = MarketUiState.Error(message?.takeIf { it.isNotBlank() } ?: "تعذر تشغيل الكاميرا")
     }
 
     fun lookup(raw: String?) {
@@ -69,11 +65,10 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
             _state.value = MarketUiState.Error("الباركود غير صالح")
             return
         }
+        // Store/scale barcodes cannot be resolved globally. Send them to the same NotFound
+        // state so the UI can offer the visual package fallback rather than stopping here.
         if (isRestrictedCirculationBarcode(barcode)) {
-            _state.value = MarketUiState.Error(
-                "هذا باركود متجر أو ميزان داخلي، وليس باركود المنتج العالمي. " +
-                    "امسح الباركود الأصلي المطبوع على عبوة الشركة حتى أتعرف على المنتج وأقارن سعره."
-            )
+            _state.value = MarketUiState.NotFound(barcode)
             return
         }
         viewModelScope.launch {
@@ -89,6 +84,28 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
                 )
             }
             if (results.isEmpty()) _state.value = MarketUiState.NotFound(barcode)
+        }
+    }
+
+    fun lookupByText(barcode: String, recognizedText: String) {
+        val cleanBarcode = barcode.trim()
+        val cleanText = recognizedText.trim()
+        if (cleanText.length < 4) {
+            _state.value = MarketUiState.Error("لم يظهر نص كافٍ للتعرف على المنتج")
+            return
+        }
+        viewModelScope.launch {
+            _state.value = MarketUiState.Loading(cleanBarcode)
+            val product = repository.lookupByText(cleanBarcode, cleanText)
+            _state.value = if (product != null) {
+                MarketUiState.Found(
+                    product = product.copy(barcode = cleanBarcode),
+                    cloudResponses = 1,
+                    servedFromCache = false
+                )
+            } else {
+                MarketUiState.NotFound(cleanBarcode)
+            }
         }
     }
 
