@@ -46,7 +46,6 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-          cache: pip
 
       - name: Install crawler dependencies
         run: python -m pip install --disable-pip-version-check requests beautifulsoup4
@@ -56,14 +55,12 @@ jobs:
         shell: bash
         run: |
           if [[ "${{ github.event_name }}" == "push" ]]; then
-            # Tiny smoke-test budget whenever the implementation changes.
             echo "food=3" >> "$GITHUB_OUTPUT"
             echo "cosmetics=1" >> "$GITHUB_OUTPUT"
           elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             echo "food=${{ inputs.food_pages || '20' }}" >> "$GITHUB_OUTPUT"
             echo "cosmetics=${{ inputs.cosmetics_pages || '2' }}" >> "$GITHUB_OUTPUT"
           else
-            # Conservative recurring crawl to avoid hammering the official site.
             echo "food=80" >> "$GITHUB_OUTPUT"
             echo "cosmetics=4" >> "$GITHUB_OUTPUT"
           fi
