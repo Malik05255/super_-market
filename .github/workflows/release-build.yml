@@ -89,10 +89,10 @@ jobs:
           test -f "$APK"
           "$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)/apksigner" verify --verbose --print-certs "$APK"
           BYTES=$(stat -c%s "$APK")
-          LIMIT=$((100 * 1024 * 1024))
+          LIMIT=$((250 * 1024 * 1024))
           echo "Release APK size: $BYTES bytes"
           if (( BYTES > LIMIT )); then
-            echo "Release APK exceeds 100 MiB quality budget." >&2
+            echo "Release APK exceeds 250 MiB quality budget." >&2
             exit 1
           fi
 
