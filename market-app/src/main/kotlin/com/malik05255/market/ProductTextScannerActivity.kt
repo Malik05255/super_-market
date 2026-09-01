@@ -334,7 +334,7 @@ class ProductTextScannerActivity : ComponentActivity() {
     }
 
     private fun normalizeKey(value: String): String = value.lowercase()
-        .replace(/[أإآ]/.toRegex(), "ا")
+        .replace(Regex("[أإآ]"), "ا")
         .replace('ة', 'ه')
         .replace('ى', 'ي')
         .replace(Regex("[^0-9a-z\\u0600-\\u06ff]+"), " ")
