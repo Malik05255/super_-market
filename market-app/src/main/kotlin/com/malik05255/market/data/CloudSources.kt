@@ -108,9 +108,6 @@ private fun productTitle(product: FactsProduct): Pair<String?, String?> {
 class SupabaseSource(private val url: String, private val key: String) : CloudSource {
     override val id = "supabase"
     override val configured = url.isNotBlank() && key.isNotBlank()
-    // Known barcodes still return from the indexed snapshot request in milliseconds.
-    // Unknown GTINs may fan out through several free identity databases, so the ceiling
-    // is intentionally longer. This affects only the exceptional miss path.
     override val lookupTimeoutMs = 28_000L
 
     private fun io.ktor.client.request.HttpRequestBuilder.applySupabaseHeaders() {
@@ -151,9 +148,6 @@ class SupabaseSource(private val url: String, private val key: String) : CloudSo
             }
         }
 
-        // Ask the server resolver using both equivalent UPC/EAN forms. The first request
-        // normally resolves the product; the alternate exists for catalogs that store the
-        // same GTIN-12 with the EAN-13 leading zero representation.
         for (candidate in equivalentGtins(barcode)) {
             val resolved = MarketHttp.post("${url.trimEnd('/')}/functions/v1/resolve-barcode") {
                 contentType(ContentType.Application.Json)
@@ -178,13 +172,26 @@ class SupabaseSource(private val url: String, private val key: String) : CloudSo
 
     override suspend fun lookupByText(barcode: String, text: String): ProductSnapshot? {
         if (!configured || text.isBlank()) return null
-        val resolved = MarketHttp.post("${url.trimEnd('/')}/functions/v1/resolve-product-text") {
+        val request = ResolveTextRequest(barcode = barcode, text = text.take(4_000))
+
+        val retailerMatch = MarketHttp.post("${url.trimEnd('/')}/functions/v1/resolve-product-text") {
             contentType(ContentType.Application.Json)
             applySupabaseHeaders()
-            setBody(ResolveTextRequest(barcode = barcode, text = text.take(4_000)))
+            setBody(request)
         }
-        if (resolved.status.value !in 200..299) return null
-        return resolved.body<ResolveTextResponse>().payload?.copy(cloudSource = "${id}_visual")
+        if (retailerMatch.status.value in 200..299) {
+            retailerMatch.body<ResolveTextResponse>().payload?.let {
+                return it.copy(cloudSource = "${id}_visual_retailer")
+            }
+        }
+
+        val globalMatch = MarketHttp.post("${url.trimEnd('/')}/functions/v1/resolve-package-text") {
+            contentType(ContentType.Application.Json)
+            applySupabaseHeaders()
+            setBody(request)
+        }
+        if (globalMatch.status.value !in 200..299) return null
+        return globalMatch.body<ResolveTextResponse>().payload?.copy(cloudSource = "${id}_visual_global")
     }
 }
 
