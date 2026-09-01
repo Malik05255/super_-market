@@ -34,6 +34,9 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
+import com.googlecode.tesseract.android.TessBaseAPI
+import java.io.File
+import java.io.FileOutputStream
 import java.util.ArrayDeque
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -41,20 +44,27 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Local-only package text fallback used after a GTIN lookup misses.
- * Images never leave the phone. Only the recognized text is sent to the
- * conservative LuLu/Tamimi identity resolver after the user confirms it.
+ * Images never leave the phone. ML Kit recognizes Latin text continuously and
+ * Tesseract adds offline Arabic-script recognition from periodic preview frames.
+ * Only the merged recognized text is sent to the conservative LuLu/Tamimi resolver.
  */
 class ProductTextScannerActivity : ComponentActivity() {
     companion object {
         const val EXTRA_INPUT_BARCODE = "input_barcode"
         const val EXTRA_RECOGNIZED_TEXT = "recognized_text"
+        private const val ARABIC_OCR_INTERVAL_MS = 2_500L
     }
 
     private val cameraExecutor = Executors.newSingleThreadExecutor()
+    private val arabicExecutor = Executors.newSingleThreadExecutor()
     private val processing = AtomicBoolean(false)
+    private val arabicProcessing = AtomicBoolean(false)
     private val recentFrames = ArrayDeque<List<String>>()
     private var camera: Camera? = null
     private var recognizer: TextRecognizer? = null
+    private var arabicOcr: TessBaseAPI? = null
+    @Volatile private var arabicReady = false
+    private var lastArabicOcrAt = 0L
     private lateinit var previewView: PreviewView
     private lateinit var statusText: TextView
     private lateinit var recognizedTextView: TextView
@@ -73,6 +83,7 @@ class ProductTextScannerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContentView(buildUi())
         recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        initializeArabicOcr()
 
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startCamera()
@@ -123,7 +134,7 @@ class ProductTextScannerActivity : ComponentActivity() {
             gravity = Gravity.CENTER
         })
         statusText = TextView(this).apply {
-            text = "وجّه الكاميرا إلى اسم المنتج والعلامة والحجم • الصورة لا تغادر جهازك"
+            text = "وجّه الكاميرا إلى الاسم والعلامة والحجم • عربي + إنجليزي • الصورة لا تغادر جهازك"
             textSize = 13f
             setTextColor(0xFFD8FFF1.toInt())
             gravity = Gravity.CENTER
@@ -143,13 +154,11 @@ class ProductTextScannerActivity : ComponentActivity() {
             text = "بانتظار قراءة اسم المنتج..."
             textSize = 13f
             setTextColor(Color.WHITE)
-            maxLines = 5
+            maxLines = 6
             setPadding(dp(10), dp(6), dp(10), dp(8))
         }
-        val textScroll = ScrollView(this).apply {
-            addView(recognizedTextView)
-        }
-        bottom.addView(textScroll, LinearLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(92)))
+        val textScroll = ScrollView(this).apply { addView(recognizedTextView) }
+        bottom.addView(textScroll, LinearLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(104)))
 
         useButton = Button(this).apply {
             text = "استخدم النص وابحث عن المنتج"
@@ -177,6 +186,37 @@ class ProductTextScannerActivity : ComponentActivity() {
 
         root.addView(bottom, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
         return root
+    }
+
+    private fun initializeArabicOcr() {
+        arabicExecutor.execute {
+            runCatching {
+                val dataRoot = File(filesDir, "tesseract")
+                val tessdata = File(dataRoot, "tessdata")
+                if (!tessdata.exists()) tessdata.mkdirs()
+                val model = File(tessdata, "ara.traineddata")
+                if (!model.exists() || model.length() < 1_000_000L) {
+                    assets.open("tessdata/ara.traineddata").use { input ->
+                        FileOutputStream(model, false).use { output -> input.copyTo(output) }
+                    }
+                }
+                val tess = TessBaseAPI()
+                if (!tess.init(dataRoot.absolutePath, "ara")) {
+                    tess.recycle()
+                    error("Arabic Tesseract initialization failed")
+                }
+                arabicOcr = tess
+                arabicReady = true
+                runOnUiThread {
+                    statusText.text = "جاهز لقراءة الاسم والعلامة والحجم بالعربي والإنجليزي • الصورة محلية فقط"
+                }
+            }.onFailure {
+                arabicReady = false
+                runOnUiThread {
+                    statusText.text = "القراءة الإنجليزية جاهزة • تعذر تجهيز العربية على هذا الجهاز"
+                }
+            }
+        }
     }
 
     @SuppressLint("UnsafeOptInUsageError")
@@ -232,9 +272,12 @@ class ProductTextScannerActivity : ComponentActivity() {
                     return@setAnalyzer
                 }
                 activeRecognizer.process(image)
-                    .addOnSuccessListener { result -> mergeFrame(result.text) }
+                    .addOnSuccessListener { result ->
+                        mergeFrame(result.text)
+                        maybeRunArabicOcr()
+                    }
                     .addOnFailureListener {
-                        runOnUiThread { statusText.text = "حرّك العبوة قليلًا وحاول تثبيت الاسم والحجم داخل الإطار" }
+                        runOnUiThread { statusText.text = "ثبّت الاسم والحجم داخل الإطار وحاول مرة أخرى" }
                     }
                     .addOnCompleteListener {
                         processing.set(false)
@@ -244,31 +287,56 @@ class ProductTextScannerActivity : ComponentActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    private fun maybeRunArabicOcr() {
+        if (!arabicReady || arabicProcessing.get()) return
+        val now = System.currentTimeMillis()
+        if (now - lastArabicOcrAt < ARABIC_OCR_INTERVAL_MS) return
+        lastArabicOcrAt = now
+        previewView.post {
+            val bitmap = previewView.bitmap ?: return@post
+            if (!arabicProcessing.compareAndSet(false, true)) return@post
+            arabicExecutor.execute {
+                try {
+                    val tess = arabicOcr ?: return@execute
+                    tess.setImage(bitmap)
+                    val text = tess.getUTF8Text().orEmpty()
+                    if (text.isNotBlank()) runOnUiThread { mergeFrame(text) }
+                } catch (_: Throwable) {
+                    // Latin OCR remains available; Arabic OCR is an additive fallback.
+                } finally {
+                    bitmap.recycle()
+                    arabicProcessing.set(false)
+                }
+            }
+        }
+    }
+
     private fun mergeFrame(raw: String) {
         val lines = raw.lineSequence()
             .map { it.trim().replace(Regex("\\s+"), " ") }
             .filter { it.length >= 2 }
             .distinctBy { normalizeKey(it) }
-            .take(16)
+            .take(20)
             .toList()
         if (lines.isEmpty()) return
 
         recentFrames.addLast(lines)
-        while (recentFrames.size > 4) recentFrames.removeFirst()
+        while (recentFrames.size > 5) recentFrames.removeFirst()
 
         val unique = LinkedHashMap<String, String>()
         recentFrames.forEach { frame ->
             frame.forEach { line -> unique[normalizeKey(line)] = line }
         }
-        recognizedText = unique.values.take(32).joinToString("\n").take(3_800)
-        runOnUiThread {
-            recognizedTextView.text = recognizedText
-            useButton.isEnabled = recognizedText.length >= 4
-            statusText.text = "تم التقاط نص • تأكد أن العلامة التجارية والحجم ظاهران ثم اضغط بحث"
-        }
+        recognizedText = unique.values.take(40).joinToString("\n").take(4_500)
+        recognizedTextView.text = recognizedText
+        useButton.isEnabled = recognizedText.length >= 4
+        statusText.text = "تم التقاط نص عربي/إنجليزي • تأكد أن العلامة والحجم ظاهران ثم اضغط بحث"
     }
 
     private fun normalizeKey(value: String): String = value.lowercase()
+        .replace(/[أإآ]/.toRegex(), "ا")
+        .replace('ة', 'ه')
+        .replace('ى', 'ي')
         .replace(Regex("[^0-9a-z\\u0600-\\u06ff]+"), " ")
         .replace(Regex("\\s+"), " ")
         .trim()
@@ -329,6 +397,12 @@ class ProductTextScannerActivity : ComponentActivity() {
         recognizer?.close()
         recognizer = null
         cameraExecutor.shutdown()
+        arabicExecutor.execute {
+            runCatching { arabicOcr?.recycle() }
+            arabicOcr = null
+            arabicReady = false
+        }
+        arabicExecutor.shutdown()
         super.onDestroy()
     }
 
