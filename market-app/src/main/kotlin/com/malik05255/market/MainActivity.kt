@@ -1,9 +1,13 @@
 package com.malik05255.market
 
+import android.app.Activity
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
@@ -72,9 +76,6 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
-import com.google.mlkit.vision.barcode.common.Barcode
-import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
-import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import com.malik05255.market.model.ProductSnapshot
 import com.malik05255.market.model.RetailerOffer
 
@@ -139,18 +140,13 @@ private fun MarketScreen(viewModel: MarketViewModel) {
     val healthy by viewModel.healthyClouds.collectAsStateWithLifecycle()
     var info by remember { mutableStateOf<ProductSnapshot?>(null) }
     val context = LocalContext.current
-    val scanner = remember(context) {
-        val options = GmsBarcodeScannerOptions.Builder()
-            .setBarcodeFormats(
-                Barcode.FORMAT_EAN_13,
-                Barcode.FORMAT_EAN_8,
-                Barcode.FORMAT_UPC_A,
-                Barcode.FORMAT_UPC_E,
-                Barcode.FORMAT_CODE_128
-            )
-            .enableAutoZoom()
-            .build()
-        GmsBarcodeScanning.getClient(context, options)
+    val scannerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val barcode = result.data?.getStringExtra(SensitiveBarcodeScannerActivity.EXTRA_BARCODE)
+            if (!barcode.isNullOrBlank()) viewModel.lookup(barcode)
+        } else {
+            result.data?.getStringExtra("error")?.takeIf { it.isNotBlank() }?.let(viewModel::scannerFailed)
+        }
     }
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
@@ -169,9 +165,7 @@ private fun MarketScreen(viewModel: MarketViewModel) {
                 Spacer(Modifier.height(14.dp))
                 Button(
                     onClick = {
-                        scanner.startScan()
-                            .addOnSuccessListener { viewModel.lookup(it.rawValue) }
-                            .addOnFailureListener { viewModel.scannerFailed(it.localizedMessage) }
+                        scannerLauncher.launch(Intent(context, SensitiveBarcodeScannerActivity::class.java))
                     },
                     modifier = Modifier.fillMaxWidth().height(62.dp),
                     shape = RoundedCornerShape(20.dp)
@@ -180,7 +174,7 @@ private fun MarketScreen(viewModel: MarketViewModel) {
                     Spacer(Modifier.size(10.dp))
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("اقرأ الباركود", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text("قراءة سريعة ومقارنة فورية", style = MaterialTheme.typography.labelSmall)
+                        Text("ماسح عالي الحساسية والدقة", style = MaterialTheme.typography.labelSmall)
                     }
                 }
                 Spacer(Modifier.height(16.dp))
