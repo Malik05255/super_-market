@@ -124,6 +124,8 @@ dependencies {
     // Bundled Latin OCR is immediately available offline and adds only a few MiB.
     // It captures common bilingual packaging brand/size text without uploading images.
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    // Arabic-script OCR fallback for Saudi/local packaging. Standard flavor keeps APK smaller.
+    implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
 
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.ktor.core)
@@ -133,3 +135,32 @@ dependencies {
 
     testImplementation(libs.junit)
 }
+
+// Bundle the official Arabic tessdata_fast model into the APK without committing binary
+// model bytes to this public repository. The source commit is immutable/pinned.
+val prepareArabicTessdata by tasks.registering {
+    val output = layout.projectDirectory.file("src/main/assets/tessdata/ara.traineddata").asFile
+    outputs.file(output)
+    doLast {
+        if (output.exists() && output.length() > 1_000_000L) return@doLast
+        output.parentFile.mkdirs()
+        val source = java.net.URI(
+            "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/923915d4ced2a7235221788285785a29c4a42d4a/ara.traineddata"
+        ).toURL()
+        val connection = source.openConnection().apply {
+            connectTimeout = 15_000
+            readTimeout = 30_000
+            setRequestProperty("User-Agent", "MoqarinAlasaarBuild/2.0")
+        }
+        connection.getInputStream().use { input ->
+            output.outputStream().use { destination -> input.copyTo(destination) }
+        }
+        check(output.length() > 1_000_000L) { "Arabic tessdata download is unexpectedly small" }
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(output.readBytes())
+            .joinToString("") { "%02x".format(it) }
+        println("Arabic tessdata: ${output.length()} bytes sha256=$digest")
+    }
+}
+
+tasks.named("preBuild").configure { dependsOn(prepareArabicTessdata) }
