@@ -117,7 +117,12 @@ dependencies {
     implementation(libs.androidx.material.icons.extended)
     implementation(libs.coil.compose)
 
-    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
+    // High-sensitivity local scanner: direct CameraX feed + bundled ML Kit model.
+    implementation("androidx.camera:camera-core:1.6.2")
+    implementation("androidx.camera:camera-camera2:1.6.2")
+    implementation("androidx.camera:camera-lifecycle:1.6.2")
+    implementation("androidx.camera:camera-view:1.6.2")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
 
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.ktor.core)
