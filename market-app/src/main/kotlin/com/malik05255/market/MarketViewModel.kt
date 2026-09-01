@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.malik05255.market.data.CloudflareSource
 import com.malik05255.market.data.FirebaseSource
 import com.malik05255.market.data.MarketRepository
+import com.malik05255.market.data.OpenFactsIdentitySource
 import com.malik05255.market.data.SupabaseSource
 import com.malik05255.market.model.ProductInfo
 import com.malik05255.market.model.ProductSnapshot
@@ -48,6 +49,7 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
         listOf(
             CloudflareSource(BuildConfig.CLOUDFLARE_PRODUCTS_URL),
             SupabaseSource(BuildConfig.SUPABASE_URL, BuildConfig.SUPABASE_ANON_KEY),
+            OpenFactsIdentitySource(),
             FirebaseSource(BuildConfig.FIREBASE_DATABASE_URL)
         )
     )
