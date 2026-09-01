@@ -9,13 +9,55 @@ function secretKey(){
   if(modern){try{const parsed=JSON.parse(modern);if(parsed?.default)return String(parsed.default)}catch{}}
   return Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")??"";
 }
-function norm(value:string|null|undefined){
-  return (value??"").normalize("NFKC").toLowerCase()
-    .replace(/[أإآ]/g,"ا").replace(/ة/g,"ه").replace(/ى/g,"ي")
-    .replace(/[^0-9a-z\u0600-\u06ff]+/gi," ").replace(/\s+/g," ").trim();
+function asciiDigits(value:string){
+  const ar="٠١٢٣٤٥٦٧٨٩",fa="۰۱۲۳۴۵۶۷۸۹";
+  return value.replace(/[٠-٩]/g,c=>String(ar.indexOf(c)))
+    .replace(/[۰-۹]/g,c=>String(fa.indexOf(c)))
+    .replace(/٫/g,".").replace(/٬/g,",");
 }
-const STOP=new Set(["the","and","with","for","pack","value","new","original","product","fresh",
-  "علبة","عبوة","منتج","جديد","اصلي","الأصلي","مع","من","في","على"]);
+function canonicalWords(value:string){
+  let s=value;
+  const replacements:Array<[RegExp,string]>=[
+    [/\bpepsi\b|بيبسي|ببسي/gi," pepsi "],
+    [/\bbarilla\b|باريلا/gi," barilla "],
+    [/\bnutella\b|نوتيلا/gi," nutella "],
+    [/\bgoody\b|قودي|جودي/gi," goody "],
+    [/\baachi\b|اتشي|اشي/gi," aachi "],
+    [/\bgerber\b|جيربر/gi," gerber "],
+    [/\bglade\b|جلاد|جليد/gi," glade "],
+    [/\bhuggies\b|هاجيز/gi," huggies "],
+    [/\bbonne\s+maman\b|بون\s*مامان/gi," bonnemaman "],
+    [/\bal\s+balad\b|البلد/gi," albalad "],
+    [/\bal\s+hadiqa\b|الحديق[هة]/gi," alhadiqa "],
+    [/\bhalwani\s+brothers\b|حلواني\s*(?:اخوان|إخوان)/gi," halwani "],
+    [/\bal\s+shifa\b|الشفاء/gi," alshifa "],
+    [/تميمي|اسواق\s+التميمي/gi," tamimi "],
+    [/لولو/gi," lulu "],
+    [/مايونيز/gi," mayonnaise "],
+    [/طحين[هة]/gi," tahina "],
+    [/زبد[هة]\s+فول\s+سوداني/gi," peanut butter "],
+    [/فول\s+سوداني/gi," peanut "],
+    [/فراول[هة]/gi," strawberry "],
+    [/مرب[ىي]/gi," jam "],
+    [/شوكولات[هة]/gi," chocolate "],
+    [/بندق/gi," hazelnut "],
+    [/عسل/gi," honey "],
+    [/ملح/gi," salt "],
+    [/دايت/gi," diet "],
+    [/لايت/gi," light "],
+    [/اصلي|أصلي/gi," original "],
+  ];
+  for(const[re,to]of replacements)s=s.replace(re,to);
+  return s;
+}
+function norm(value:string|null|undefined){
+  return canonicalWords(asciiDigits((value??"").normalize("NFKC").toLowerCase()))
+    .replace(/[أإآ]/g,"ا").replace(/[ؤ]/g,"و").replace(/[ئ]/g,"ي")
+    .replace(/ة/g,"ه").replace(/ى/g,"ي").replace(/[\u0640\u064b-\u065f\u0670]/g,"")
+    .replace(/[^0-9a-z\u0600-\u06ff.]+/gi," ").replace(/\s+/g," ").trim();
+}
+const STOP=new Set(["the","and","with","for","pack","value","new","product","fresh",
+  "علبه","عبوه","منتج","جديد","مع","من","في","على"]);
 function tokens(value:string|null|undefined){
   return [...new Set(norm(value).split(" ").filter(t=>t.length>=2&&!STOP.has(t)))];
 }
@@ -23,13 +65,13 @@ type Size={value:number;unit:"g"|"ml"};
 function sizes(value:string):Size[]{
   const s=norm(value),out:Size[]=[];
   const patterns:Array<[RegExp,"g"|"ml",number]>=[
-    [/\b(\d+(?:[.,]\d+)?)\s*(?:g|gm|gram|جرام|غرام)\b/gi,"g",1],
-    [/\b(\d+(?:[.,]\d+)?)\s*(?:kg|kilogram|كيلو|كجم)\b/gi,"g",1000],
-    [/\b(\d+(?:[.,]\d+)?)\s*(?:ml|مل|مليلتر)\b/gi,"ml",1],
-    [/\b(\d+(?:[.,]\d+)?)\s*(?:l|ltr|liter|litre|لتر)\b/gi,"ml",1000],
+    [/\b(\d+(?:[.]\d+)?)\s*(?:g|gm|gram|جرام|غرام)\b/gi,"g",1],
+    [/\b(\d+(?:[.]\d+)?)\s*(?:kg|kilogram|كيلو|كجم)\b/gi,"g",1000],
+    [/\b(\d+(?:[.]\d+)?)\s*(?:ml|مل|مليلتر)\b/gi,"ml",1],
+    [/\b(\d+(?:[.]\d+)?)\s*(?:l|ltr|liter|litre|لتر)\b/gi,"ml",1000],
   ];
   for(const[re,unit,m]of patterns)for(const x of s.matchAll(re)){
-    const n=Number(x[1].replace(",","."))*m;
+    const n=Number(x[1])*m;
     if(n>0&&n<=100000)out.push({value:Math.round(n*1000)/1000,unit});
   }
   return out;
@@ -44,20 +86,29 @@ function sizeMatches(product:any,observed:Size[]){
   const target=Number(product.net_content_value);
   return observed.some(x=>x.unit===unit&&Math.abs(x.value-target)<0.001)?1:0;
 }
+function genericRetailBrand(value:string|null|undefined){
+  const b=norm(value);
+  return b==="lulu pl"||b==="lulu"||b.startsWith("tamimi markets")||b==="fresh";
+}
 function candidateScore(product:any,text:string){
   const textTokens=new Set(tokens(text));
   const brandTokens=tokens(product.brand);
   const nameTokens=tokens([product.canonical_name_ar,product.canonical_name_en].filter(Boolean).join(" "));
+  const genericBrand=genericRetailBrand(product.brand);
   const brand=overlap(brandTokens,textTokens);
   const name=overlap(nameTokens,textTokens);
   const observed=sizes(text);
   const size=sizeMatches(product,observed);
   const brandExact=brandTokens.length>0&&brand===1;
   const nameHits=nameTokens.filter(t=>textTokens.has(t)).length;
-  if(brandTokens.length&&brand<0.5)return {score:0,brand,name,size,nameHits};
+
+  if(!genericBrand&&brandTokens.length&&brand<0.5)return {score:0,brand,name,size,nameHits};
   if(nameHits<2&&!(brandExact&&nameHits>=1))return {score:0,brand,name,size,nameHits};
   if(product.net_content_value!=null&&observed.length&&size===0)return {score:0,brand,name,size,nameHits};
-  const score=(brandTokens.length?0.4*brand:0.15)+(0.4*name)+(0.2*size)+(brandExact?0.05:0);
+
+  const score=genericBrand
+    ? (0.12*brand)+(0.63*name)+(0.25*size)
+    : (brandTokens.length?0.4*brand:0.15)+(0.4*name)+(0.2*size)+(brandExact?0.05:0);
   return {score:Math.min(1,score),brand,name,size,nameHits};
 }
 
@@ -66,7 +117,7 @@ Deno.serve(async(req:Request)=>{
   const projectUrl=Deno.env.get("SUPABASE_URL")??"",key=secretKey();
   if(!projectUrl||!key)return Response.json({error:"server_config_missing"},{status:503});
   let body:any={};try{body=await req.json()}catch{}
-  const barcode=String(body.barcode??"").replace(/\D+/g,"").slice(0,18);
+  const barcode=asciiDigits(String(body.barcode??"")).replace(/\D+/g,"").slice(0,18);
   const text=String(body.text??"").slice(0,MAX_TEXT_LENGTH).trim();
   if(text.length<4)return Response.json({status:"insufficient_text",payload:null});
 
