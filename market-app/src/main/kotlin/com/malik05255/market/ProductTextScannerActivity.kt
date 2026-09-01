@@ -5,7 +5,12 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.graphics.Paint
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.util.Size
@@ -41,18 +46,20 @@ import java.util.ArrayDeque
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.math.max
 
 /**
  * Local-only package text fallback used after a GTIN lookup misses.
  * Images never leave the phone. ML Kit recognizes Latin text continuously and
- * Tesseract adds offline Arabic-script recognition from periodic preview frames.
- * Only the merged recognized text is sent to the conservative LuLu/Tamimi resolver.
+ * Tesseract tessdata_best adds offline Arabic-script recognition periodically.
+ * Only merged recognized text is sent to the conservative LuLu/Tamimi resolver.
  */
 class ProductTextScannerActivity : ComponentActivity() {
     companion object {
         const val EXTRA_INPUT_BARCODE = "input_barcode"
         const val EXTRA_RECOGNIZED_TEXT = "recognized_text"
-        private const val ARABIC_OCR_INTERVAL_MS = 2_500L
+        private const val ARABIC_OCR_INTERVAL_MS = 3_800L
+        private const val BEST_ARABIC_MODEL_MIN_BYTES = 5_000_000L
     }
 
     private val cameraExecutor = Executors.newSingleThreadExecutor()
@@ -134,7 +141,7 @@ class ProductTextScannerActivity : ComponentActivity() {
             gravity = Gravity.CENTER
         })
         statusText = TextView(this).apply {
-            text = "وجّه الكاميرا إلى الاسم والعلامة والحجم • عربي + إنجليزي • الصورة لا تغادر جهازك"
+            text = "وجّه الاسم والعلامة والحجم داخل الإطار • عربي + إنجليزي • الصورة لا تغادر جهازك"
             textSize = 13f
             setTextColor(0xFFD8FFF1.toInt())
             gravity = Gravity.CENTER
@@ -161,7 +168,7 @@ class ProductTextScannerActivity : ComponentActivity() {
         bottom.addView(textScroll, LinearLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, dp(104)))
 
         useButton = Button(this).apply {
-            text = "استخدم النص وابحث عن المنتج"
+            text = "ابحث بهذا الاسم والحجم"
             isEnabled = false
             setOnClickListener { finishWithText() }
         }
@@ -195,20 +202,28 @@ class ProductTextScannerActivity : ComponentActivity() {
                 val tessdata = File(dataRoot, "tessdata")
                 if (!tessdata.exists()) tessdata.mkdirs()
                 val model = File(tessdata, "ara.traineddata")
-                if (!model.exists() || model.length() < 1_000_000L) {
+
+                // Builds before the accuracy upgrade may have cached tessdata_fast in filesDir.
+                // Replace that smaller model automatically with the bundled tessdata_best model.
+                if (!model.exists() || model.length() < BEST_ARABIC_MODEL_MIN_BYTES) {
                     assets.open("tessdata/ara.traineddata").use { input ->
                         FileOutputStream(model, false).use { output -> input.copyTo(output) }
                     }
                 }
+                check(model.length() >= BEST_ARABIC_MODEL_MIN_BYTES) { "Arabic best model is unavailable" }
+
                 val tess = TessBaseAPI()
-                if (!tess.init(dataRoot.absolutePath, "ara")) {
+                if (!tess.init(dataRoot.absolutePath, "ara", TessBaseAPI.OEM_LSTM_ONLY)) {
                     tess.recycle()
                     error("Arabic Tesseract initialization failed")
                 }
+                tess.pageSegMode = TessBaseAPI.PageSegMode.PSM_SPARSE_TEXT
+                tess.setVariable("preserve_interword_spaces", "1")
+                tess.setVariable("user_defined_dpi", "300")
                 arabicOcr = tess
                 arabicReady = true
                 runOnUiThread {
-                    statusText.text = "جاهز لقراءة الاسم والعلامة والحجم بالعربي والإنجليزي • الصورة محلية فقط"
+                    statusText.text = "العربي عالي الدقة + الإنجليزي جاهزان • ضع الاسم والحجم داخل الإطار"
                 }
             }.onFailure {
                 arabicReady = false
@@ -294,21 +309,90 @@ class ProductTextScannerActivity : ComponentActivity() {
         lastArabicOcrAt = now
         previewView.post {
             val bitmap = previewView.bitmap ?: return@post
-            if (!arabicProcessing.compareAndSet(false, true)) return@post
+            if (!arabicProcessing.compareAndSet(false, true)) {
+                bitmap.recycle()
+                return@post
+            }
             arabicExecutor.execute {
+                var prepared: Bitmap? = null
                 try {
                     val tess = arabicOcr ?: return@execute
-                    tess.setImage(bitmap)
-                    val text = tess.getUTF8Text().orEmpty()
-                    if (text.isNotBlank()) runOnUiThread { mergeFrame(text) }
+                    prepared = prepareArabicBitmap(bitmap)
+                    tess.setImage(prepared)
+                    val raw = tess.getUTF8Text().orEmpty()
+                    val confidence = tess.meanConfidence()
+                    val confident = runCatching {
+                        tess.getConfidentText(28, TessBaseAPI.PageIteratorLevel.RIL_WORD)
+                    }.getOrDefault("")
+                    val text = mergeOcrPasses(raw, confident)
+                    if (text.isNotBlank()) {
+                        runOnUiThread {
+                            mergeFrame(text)
+                            if (confidence > 0) {
+                                statusText.text = "التقط العربي بثقة $confidence% • تأكد من الاسم والحجم ثم اضغط بحث"
+                            }
+                        }
+                    }
                 } catch (_: Throwable) {
-                    // Latin OCR remains available; Arabic OCR is an additive fallback.
+                    // Latin OCR remains available; Arabic OCR is additive.
                 } finally {
-                    bitmap.recycle()
+                    if (prepared != null && prepared !== bitmap && !prepared.isRecycled) prepared.recycle()
+                    if (!bitmap.isRecycled) bitmap.recycle()
                     arabicProcessing.set(false)
                 }
             }
         }
+    }
+
+    private fun prepareArabicBitmap(source: Bitmap): Bitmap {
+        val cropWidth = (source.width * 0.92f).toInt().coerceAtLeast(1)
+        val cropHeight = (source.height * 0.62f).toInt().coerceAtLeast(1)
+        val left = ((source.width - cropWidth) / 2).coerceAtLeast(0)
+        val top = (source.height * 0.16f).toInt().coerceIn(0, max(0, source.height - cropHeight))
+        val crop = Bitmap.createBitmap(source, left, top, cropWidth.coerceAtMost(source.width - left), cropHeight.coerceAtMost(source.height - top))
+
+        val desiredWidth = 1_600
+        val scale = (desiredWidth.toFloat() / crop.width).coerceIn(1f, 1.45f)
+        val scaled = if (scale > 1.02f) {
+            Bitmap.createScaledBitmap(crop, (crop.width * scale).toInt(), (crop.height * scale).toInt(), true)
+        } else crop
+
+        val output = Bitmap.createBitmap(scaled.width, scaled.height, Bitmap.Config.ARGB_8888)
+        val grayscale = ColorMatrix().apply { setSaturation(0f) }
+        val contrast = 1.32f
+        val translate = (1f - contrast) * 128f
+        grayscale.postConcat(
+            ColorMatrix(
+                floatArrayOf(
+                    contrast, 0f, 0f, 0f, translate,
+                    0f, contrast, 0f, 0f, translate,
+                    0f, 0f, contrast, 0f, translate,
+                    0f, 0f, 0f, 1f, 0f
+                )
+            )
+        )
+        Canvas(output).drawBitmap(
+            scaled,
+            0f,
+            0f,
+            Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+                colorFilter = ColorMatrixColorFilter(grayscale)
+            }
+        )
+        if (scaled !== crop && !scaled.isRecycled) scaled.recycle()
+        if (!crop.isRecycled) crop.recycle()
+        return output
+    }
+
+    private fun mergeOcrPasses(raw: String, confident: String): String {
+        val unique = LinkedHashMap<String, String>()
+        sequenceOf(raw, confident).forEach { block ->
+            block.lineSequence()
+                .map { it.trim().replace(Regex("\\s+"), " ") }
+                .filter { it.length >= 2 }
+                .forEach { line -> unique[normalizeKey(line)] = line }
+        }
+        return unique.values.joinToString("\n").take(3_500)
     }
 
     private fun mergeFrame(raw: String) {
@@ -330,7 +414,6 @@ class ProductTextScannerActivity : ComponentActivity() {
         recognizedText = unique.values.take(40).joinToString("\n").take(4_500)
         recognizedTextView.text = recognizedText
         useButton.isEnabled = recognizedText.length >= 4
-        statusText.text = "تم التقاط نص عربي/إنجليزي • تأكد أن العلامة والحجم ظاهران ثم اضغط بحث"
     }
 
     private fun normalizeKey(value: String): String = value.lowercase()
