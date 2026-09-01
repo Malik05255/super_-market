@@ -16,6 +16,11 @@
         android:theme="@style/Theme.Market">
 
         <activity
+            android:name=".ProductTextScannerActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
+
+        <activity
             android:name=".SensitiveBarcodeScannerActivity"
             android:exported="false"
             android:screenOrientation="portrait" />
