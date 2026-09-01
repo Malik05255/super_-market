@@ -65,6 +65,7 @@ data class ProductSnapshot(
         get() = when {
             exactBarcodeMatch -> "السعر الحالي لنفس الباركود"
             headlineMatchMethod == "canonical_identity" -> "السعر الحالي لنفس المنتج"
+            headlineMatchMethod == "visual_text_identity" -> "السعر الحالي لتطابق بصري لنفس المنتج"
             else -> "السعر الحالي"
         }
 }
