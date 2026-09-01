@@ -1,6 +1,7 @@
 package com.malik05255.market
 
 import android.app.Application
+import android.content.Context
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.malik05255.market.data.CloudflareSource
@@ -54,6 +55,7 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
         )
     )
     private val mediaDemand = MediaDemandTracker(application)
+    private val scanEvidence = application.getSharedPreferences("scan_visual_evidence", Context.MODE_PRIVATE)
 
     private val _state = MutableStateFlow<MarketUiState>(MarketUiState.Idle)
     val state: StateFlow<MarketUiState> = _state.asStateFlow()
@@ -82,6 +84,7 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
         }
 
         val allowProductMedia = mediaDemand.recordProductScan(barcode)
+        val packageText = recentPackageText(barcode)
         viewModelScope.launch {
             _state.value = MarketUiState.Loading(barcode)
             val results = mutableListOf<ProductSnapshot>()
@@ -89,34 +92,68 @@ class MarketViewModel(application: Application) : AndroidViewModel(application) 
 
             repository.lookup(barcode).collect { product ->
                 results += product
-                val merged = merge(barcode, results)
-
-                merged.offers.forEach { offer ->
-                    val retailerKey = normalizedRetailerKey(offer.retailer)
-                    if (recordedRetailers.add(retailerKey)) {
-                        mediaDemand.recordRetailerSeen(offer.retailer, barcode)
-                    }
-                }
-
-                val storeMediaRetailers = merged.offers
-                    .asSequence()
-                    .filter { mediaDemand.isRetailerMediaAllowed(it.retailer) }
-                    .map { normalizedRetailerKey(it.retailer) }
-                    .toSet()
-
-                _state.value = MarketUiState.Found(
-                    product = merged,
-                    cloudResponses = results.mapNotNull { it.cloudSource }
-                        .filterNot { it == MarketRepository.LOCAL_CACHE }
-                        .distinct()
-                        .size,
-                    servedFromCache = results.any { it.cloudSource == MarketRepository.LOCAL_CACHE },
-                    allowProductMedia = allowProductMedia || mediaDemand.isProductMediaAllowed(barcode),
-                    storeMediaRetailers = storeMediaRetailers
-                )
+                publishFound(barcode, results, recordedRetailers, allowProductMedia)
             }
+
+            val needsVisualFallback = packageText.isNotBlank() &&
+                (results.isEmpty() || results.none { it.offers.isNotEmpty() || it.currentPrice != null })
+            if (needsVisualFallback) {
+                repository.lookupByText(barcode, packageText)?.let { visual ->
+                    results += visual
+                    publishFound(barcode, results, recordedRetailers, allowProductMedia)
+                }
+            }
+
             if (results.isEmpty()) _state.value = MarketUiState.NotFound(barcode)
+            clearPackageText(barcode)
         }
+    }
+
+    private fun recentPackageText(barcode: String): String {
+        val capturedAt = scanEvidence.getLong("${barcode}:at", 0L)
+        if (capturedAt <= 0L || System.currentTimeMillis() - capturedAt > 2 * 60 * 1000L) {
+            clearPackageText(barcode)
+            return ""
+        }
+        return scanEvidence.getString("${barcode}:text", "").orEmpty().trim().take(4_000)
+    }
+
+    private fun clearPackageText(barcode: String) {
+        scanEvidence.edit().remove("${barcode}:text").remove("${barcode}:at").apply()
+    }
+
+    private fun publishFound(
+        barcode: String,
+        results: List<ProductSnapshot>,
+        recordedRetailers: MutableSet<String>,
+        allowProductMedia: Boolean
+    ) {
+        if (results.isEmpty()) return
+        val merged = merge(barcode, results)
+
+        merged.offers.forEach { offer ->
+            val retailerKey = normalizedRetailerKey(offer.retailer)
+            if (recordedRetailers.add(retailerKey)) {
+                mediaDemand.recordRetailerSeen(offer.retailer, barcode)
+            }
+        }
+
+        val storeMediaRetailers = merged.offers
+            .asSequence()
+            .filter { mediaDemand.isRetailerMediaAllowed(it.retailer) }
+            .map { normalizedRetailerKey(it.retailer) }
+            .toSet()
+
+        _state.value = MarketUiState.Found(
+            product = merged,
+            cloudResponses = results.mapNotNull { it.cloudSource }
+                .filterNot { it == MarketRepository.LOCAL_CACHE }
+                .distinct()
+                .size,
+            servedFromCache = results.any { it.cloudSource == MarketRepository.LOCAL_CACHE },
+            allowProductMedia = allowProductMedia || mediaDemand.isProductMediaAllowed(barcode),
+            storeMediaRetailers = storeMediaRetailers
+        )
     }
 
     private fun merge(barcode: String, results: List<ProductSnapshot>): ProductSnapshot {
