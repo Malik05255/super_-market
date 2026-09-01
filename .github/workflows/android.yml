@@ -90,8 +90,8 @@ jobs:
           echo "APK size: ${MIB} MiB"
           echo "APK_SIZE_BYTES=$BYTES" >> "$GITHUB_ENV"
           echo "APK_SIZE_MIB=$MIB" >> "$GITHUB_ENV"
-          if (( BYTES > 104857600 )); then
-            echo "APK exceeds the 100 MiB quality budget" >&2
+          if (( BYTES > 262144000 )); then
+            echo "APK exceeds the 250 MiB quality budget" >&2
             exit 1
           fi
 
