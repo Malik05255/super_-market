@@ -45,6 +45,21 @@ class MarketRepository(
         }
     }
 
+    /**
+     * Visual text matches are deliberately transient: never cache them under the scanned
+     * barcode, because OCR evidence is useful for this lookup but is not proof that the
+     * barcode belongs to the matched canonical product.
+     */
+    suspend fun lookupByText(barcode: String, text: String): ProductSnapshot? = coroutineScope {
+        sources.filter { it.configured }.map { source ->
+            async(Dispatchers.IO) {
+                withTimeoutOrNull(12_000) {
+                    runCatching { source.lookupByText(barcode, text) }.getOrNull()
+                }
+            }
+        }.awaitAll().filterNotNull().maxByOrNull { it.confidence ?: 0.0 }
+    }
+
     private suspend fun cached(barcode: String): ProductSnapshot? = withContext(Dispatchers.IO) {
         prefs.getString(barcode, null)?.let { raw ->
             runCatching { json.decodeFromString<ProductSnapshot>(raw) }.getOrNull()
@@ -52,6 +67,7 @@ class MarketRepository(
     }
 
     private fun cache(product: ProductSnapshot) {
+        if (product.headlineMatchMethod == "visual_text_identity") return
         val existing = prefs.getString(product.barcode, null)?.let { raw ->
             runCatching { json.decodeFromString<ProductSnapshot>(raw) }.getOrNull()
         }
