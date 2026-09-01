@@ -1,13 +1,10 @@
-name: Supermarket Price Refresh
+name: Supermarket Price Refresh (Manual Fallback)
 
 on:
-  schedule:
-    # Twice daily. Riyadh: approximately 03:17 and 15:17.
-    - cron: "17 */12 * * *"
   workflow_dispatch:
     inputs:
       retailer:
-        description: "Optional retailer slug (default scheduled scope: lulu + tamimi)"
+        description: "Optional retailer slug (default scope: lulu + tamimi)"
         required: false
         type: string
 
@@ -92,7 +89,7 @@ jobs:
             --input cloud/.generated/d1-priority.json \
             --mark-sql cloud/.generated/d1-priority-mark.sql
 
-      - name: Continuously discover new public products
+      - name: Discover public products
         if: steps.config.outputs.ready == 'true'
         shell: bash
         run: |
@@ -139,12 +136,13 @@ jobs:
       - name: Refresh summary
         if: always()
         run: |
-          echo "### Supermarket refresh" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Supermarket refresh fallback" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Production scheduler: Supabase pg_cron" >> "$GITHUB_STEP_SUMMARY"
+          echo "- This workflow: manual fallback / replica recovery only" >> "$GITHUB_STEP_SUMMARY"
           echo "- Automated retailer scope: LuLu + Tamimi" >> "$GITHUB_STEP_SUMMARY"
           echo "- GTIN/product association tests: required before ingestion" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Small public discovery: every 12 hours" >> "$GITHUB_STEP_SUMMARY"
           if [[ "${{ steps.config.outputs.ready }}" != "true" ]]; then
-            echo "- Status: add SUPABASE_SERVICE_ROLE_KEY to enable canonical ingestion" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Status: add SUPABASE_SERVICE_ROLE_KEY to enable manual canonical ingestion" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- Supabase canonical discovery + refresh: attempted" >> "$GITHUB_STEP_SUMMARY"
             echo "- Priority unknown scans: imported when D1 is configured" >> "$GITHUB_STEP_SUMMARY"
