@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "resolverOrder": [
+    "local_cache",
+    "supabase_cache",
+    "saudi_master_release",
+    "sfda_live",
+    "open_facts"
+  ],
+  "exactBarcodeMatch": true,
+  "storeProductMatching": "after_identity_resolution",
+  "freeOnlySources": true
+}
