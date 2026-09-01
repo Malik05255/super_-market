@@ -7,7 +7,6 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -76,7 +75,6 @@ import coil.compose.AsyncImage
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
-import com.malik05255.market.model.ProductInfo
 import com.malik05255.market.model.ProductSnapshot
 import com.malik05255.market.model.RetailerOffer
 
@@ -123,9 +121,8 @@ private val DarkColors = darkColorScheme(
 
 @Composable
 private fun MarketTheme(content: @Composable () -> Unit) {
-    val dark = androidx.compose.foundation.isSystemInDarkTheme()
     MaterialTheme(
-        colorScheme = if (dark) DarkColors else LightColors,
+        colorScheme = if (androidx.compose.foundation.isSystemInDarkTheme()) DarkColors else LightColors,
         shapes = Shapes(
             small = RoundedCornerShape(14.dp),
             medium = RoundedCornerShape(20.dp),
@@ -142,8 +139,8 @@ private fun MarketScreen(viewModel: MarketViewModel) {
     val healthy by viewModel.healthyClouds.collectAsStateWithLifecycle()
     var info by remember { mutableStateOf<ProductSnapshot?>(null) }
     val context = LocalContext.current
-    val options = remember {
-        GmsBarcodeScannerOptions.Builder()
+    val scanner = remember(context) {
+        val options = GmsBarcodeScannerOptions.Builder()
             .setBarcodeFormats(
                 Barcode.FORMAT_EAN_13,
                 Barcode.FORMAT_EAN_8,
@@ -153,8 +150,8 @@ private fun MarketScreen(viewModel: MarketViewModel) {
             )
             .enableAutoZoom()
             .build()
+        GmsBarcodeScanning.getClient(context, options)
     }
-    val scanner = remember(context, options) { GmsBarcodeScanning.getClient(context, options) }
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         Scaffold(containerColor = MaterialTheme.colorScheme.background) { insets ->
@@ -224,7 +221,11 @@ private fun Header(healthy: Int, configured: Int) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Outlined.CheckCircle, null, Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.size(7.dp))
-            Text("نفس الباركود أولًا • ثم نفس المنتج • تحديث كل 12 ساعة", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                "نفس الباركود أولًا • ثم نفس المنتج • تحديث كل 12 ساعة",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -239,10 +240,11 @@ private fun ProductImage(state: MarketUiState) {
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
         Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-            if (!product?.imageUrl.isNullOrBlank()) {
+            val imageUrl = product?.imageUrl
+            if (!imageUrl.isNullOrBlank()) {
                 AsyncImage(
-                    model = product?.imageUrl,
-                    contentDescription = product?.displayName,
+                    model = imageUrl,
+                    contentDescription = product.displayName,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(22.dp))
                 )
@@ -320,9 +322,16 @@ private fun ProductResult(state: MarketUiState.Found, onInfo: (ProductSnapshot) 
                 Text(p.displayName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Black, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 Text("الباركود ${p.barcode}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(14.dp))
-                Text("السعر الحالي لنفس الباركود", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(p.currentPriceLabel, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(formatPrice(p.currentPrice, p.currency), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Black, color = MaterialTheme.colorScheme.primary)
                 p.retailer?.let { Text("في $it", fontWeight = FontWeight.SemiBold) }
+                if (!p.exactBarcodeMatch && p.headlineMatchMethod == "canonical_identity") {
+                    Text(
+                        "السعر مربوط بنفس المنتج والحجم، وليس بباركود منشور من المتجر.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Spacer(Modifier.height(14.dp))
                 OutlinedButton(onClick = { onInfo(p) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
                     Icon(Icons.Outlined.Info, null)
@@ -374,7 +383,13 @@ private fun ProductResult(state: MarketUiState.Found, onInfo: (ProductSnapshot) 
 }
 
 @Composable
-private fun PriceStat(modifier: Modifier, icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, value: Double?, currency: String) {
+private fun PriceStat(
+    modifier: Modifier,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    value: Double?,
+    currency: String
+) {
     Card(modifier, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
         Column(Modifier.padding(14.dp)) {
             Icon(icon, null, Modifier.size(21.dp), tint = MaterialTheme.colorScheme.primary)
@@ -398,7 +413,12 @@ private fun OfferRow(offer: RetailerOffer, scanned: String, cheapest: Boolean) {
                     }
                 }
             }
-            val match = if (offer.barcode == scanned) "نفس الباركود" else if (!offer.barcode.isNullOrBlank()) "نفس المنتج • باركود مختلف" else null
+            val match = when {
+                offer.barcode == scanned -> "نفس الباركود"
+                !offer.barcode.isNullOrBlank() -> "نفس المنتج • باركود مختلف"
+                offer.matchMethod == "canonical_identity" -> "نفس المنتج • المتجر لا ينشر الباركود"
+                else -> null
+            }
             match?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }
         }
         Text(formatPrice(offer.price, offer.currency), fontWeight = FontWeight.Black, style = MaterialTheme.typography.titleMedium)
@@ -410,7 +430,13 @@ private fun OfferRow(offer: RetailerOffer, scanned: String, cheapest: Boolean) {
 private fun ProductInfoSheet(product: ProductSnapshot, onDismiss: () -> Unit) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheet) {
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp).verticalScroll(rememberScrollState())) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 28.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Info, null, tint = MaterialTheme.colorScheme.primary)
                 Spacer(Modifier.size(8.dp))
@@ -423,7 +449,11 @@ private fun ProductInfoSheet(product: ProductSnapshot, onDismiss: () -> Unit) {
             if (info == null || !info.hasUsefulData) {
                 Text("لا توجد معلومات موثقة كافية لهذا المنتج حتى الآن.")
             } else {
-                InfoSection(Icons.Outlined.Public, "بلد/مكان التصنيع", listOfNotNull(info.manufacturingCountry, info.manufacturingPlaces).joinToString(" • ").ifBlank { "غير متوفر" })
+                InfoSection(
+                    Icons.Outlined.Public,
+                    "بلد/مكان التصنيع",
+                    listOfNotNull(info.manufacturingCountry, info.manufacturingPlaces).joinToString(" • ").ifBlank { "غير متوفر" }
+                )
                 InfoSection(Icons.Outlined.RestaurantMenu, "المكونات", info.ingredients ?: "غير متوفرة")
                 if (info.allergens.isNotEmpty()) InfoSection(Icons.Outlined.WarningAmber, "مسببات الحساسية", info.allergens.joinToString(" • "))
                 if (info.positiveNotes.isNotEmpty()) InfoSection(Icons.Outlined.CheckCircle, "ملاحظات إيجابية على التركيبة", info.positiveNotes.joinToString("\n• ", prefix = "• "))
@@ -439,7 +469,9 @@ private fun ProductInfoSheet(product: ProductSnapshot, onDismiss: () -> Unit) {
 private fun InfoSection(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, body: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.Top) {
         Surface(Modifier.size(40.dp), RoundedCornerShape(13.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-            Box(contentAlignment = Alignment.Center) { Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary) }
+            Box(contentAlignment = Alignment.Center) {
+                Icon(icon, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
+            }
         }
         Spacer(Modifier.size(10.dp))
         Column(Modifier.weight(1f)) {
